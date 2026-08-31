@@ -1,0 +1,42 @@
+# =============================================================================
+# LƯỢC ĐỒ HỒ SƠ PHÒNG BAN (department profile schema)
+# -----------------------------------------------------------------------------
+# Đây là cơ chế MỞ RỘNG của toàn bộ hệ thống.
+#
+# Ý tưởng cốt lõi: cấu trúc quy trình của mọi phòng ban gần như giống nhau —
+#     tiếp nhận → phân loại → soạn thảo → thẩm định chéo → duyệt → phát hành
+# Cái khác nhau chỉ là bốn thứ: DỮ LIỆU nào, AI duyệt, MODEL nào được phép,
+# và ĐẦU RA đi đâu.
+#
+# Vì vậy: thêm một phòng ban = thêm MỘT file YAML ở đây.
+# Không sửa code, không sửa đồ thị, không deploy lại.
+# =============================================================================
+
+name: string                # tên hiển thị của phòng ban
+dataClass: string           # public | internal | confidential | restricted
+                            # -> quyết định model nào được phép (xem policies.py)
+
+requesters: [string]        # ai được gửi yêu cầu; "*" = mọi nhân viên
+approvers: [string]         # ai được duyệt ở checkpoint; KHÔNG được trùng requester
+                            #   với dataClass confidential/restricted
+
+capabilityPack: string      # tên file trong capability-plane/packs/
+dataSources: [string]       # nguồn dữ liệu được phép đọc (khai báo để agent biết)
+
+agents:
+  classifier: string        # backend acpx dùng để phân loại (rẻ, nhanh)
+  drafter: string           # backend soạn thảo
+  reviewer: string          # backend thẩm định — PHẢI khác drafter
+
+categories: [string]        # tập nhãn phân loại của phòng ban (hữu hạn, đóng)
+reviewCriteria: [string]    # tiêu chí thẩm định, viết như checklist
+systemPrompt: string        # hướng dẫn nghiệp vụ riêng, tiêm vào bước soạn thảo
+
+output:                     # nơi kết quả được phát hành
+  server: string            #   tên MCP server trong mcporter.json
+  tool: string              #   tên tool
+  params: object            #   tham số cố định
+
+limits:
+  maxCostUsdPerRequest: number
+  maxRevisions: number

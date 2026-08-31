@@ -1,0 +1,39 @@
+// =============================================================================
+// CRON — các việc định kỳ do fleet tự chạy (đây là "workflow xác định" đơn giản)
+// -----------------------------------------------------------------------------
+// Quy tắc: cron chỉ dùng cho việc ĐỊNH KỲ + ĐƠN GIẢN (1 bước).
+// Việc nhiều bước có nhánh → dùng n8n (nghiệp vụ) hoặc LangGraph (bền vững).
+// =============================================================================
+{
+  cron: {
+    enabled: true,
+    // Múi giờ chuẩn của fleet — mọi lịch bên dưới tính theo giờ này.
+    timezone: "Asia/Ho_Chi_Minh",
+    jobs: {
+      // 08:30 mỗi ngày làm việc: tổng hợp trạng thái cho standup.
+      "daily-standup": {
+        schedule: "30 8 * * 1-5",
+        agentId: "analyst",
+        prompt: "Tổng hợp hoạt động 24h qua: PR đã mở/đã merge, issue chuyển trạng thái, cảnh báo production. Trả về đúng 3 mục: Hôm qua / Hôm nay / Vướng mắc. Gửi vào kênh #fleet-standup.",
+      },
+      // 02:00 mỗi ngày: quét bảo mật phụ thuộc.
+      "nightly-security-scan": {
+        schedule: "0 2 * * *",
+        agentId: "security",
+        prompt: "Chạy quét phụ thuộc và quét secret trên nhánh main. Nếu có phát hiện mức HIGH/CRITICAL, tạo issue và báo vào #fleet-security.",
+      },
+      // Thứ Hai 09:00: rà nợ kỹ thuật.
+      "weekly-tech-debt": {
+        schedule: "0 9 * * 1",
+        agentId: "architect",
+        prompt: "Rà soát nợ kỹ thuật tuần qua: file thay đổi nhiều nhất, độ phức tạp tăng, test bị bỏ qua. Đề xuất tối đa 3 hạng mục ưu tiên kèm ước lượng.",
+      },
+      // Mỗi 6 giờ: kiểm tra sức khoẻ fleet.
+      "fleet-health": {
+        schedule: "0 */6 * * *",
+        agentId: "sre",
+        prompt: "Kiểm tra /healthz, /readyz của gateway, độ trễ MCP bridge, và hạn mức token còn lại của từng agent. Chỉ báo cáo khi có bất thường.",
+      },
+    },
+  },
+}

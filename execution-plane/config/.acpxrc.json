@@ -1,0 +1,20 @@
+{
+  "//": "acpx — cấu hình CẤP DỰ ÁN. Copy file này vào gốc repo sản phẩm.",
+  "//1": "Ghi đè cấu hình toàn cục cho riêng repo này. Commit vào git.",
+
+  "defaultAgent": "claude",
+  "timeout": 3600,
+  "ttl": 0,
+  "format": "json",
+
+  "//permissions": "Repo sản xuất: mặc định chỉ đọc. Ghi phải bật rõ ràng bằng cờ.",
+  "defaultPermissions": "approve-reads",
+  "nonInteractivePermissions": "fail",
+
+  "agents": {
+    "//": "Ghi đè backend theo repo — ví dụ repo hạ tầng bắt buộc dùng model nội bộ",
+    "//1": "vì mã nguồn không được rời hạ tầng công ty.",
+    "claude": { "argv": ["claude-code-acp"] },
+    "codex": { "argv": ["codex-acp", "--mode", "stable"] }
+  }
+}

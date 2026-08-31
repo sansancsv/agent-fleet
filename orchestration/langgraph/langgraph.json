@@ -1,0 +1,13 @@
+{
+  "//": "Khai báo cho LangGraph CLI: langgraph dev / langgraph build / langgraph up",
+  "dependencies": ["."],
+  "graphs": {
+    "fleet": "./src/fleet/graph.py:graph"
+  },
+  "env": ".env",
+  "python_version": "3.12",
+  "dockerfile_lines": [
+    "RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client curl ca-certificates && rm -rf /var/lib/apt/lists/*",
+    "RUN npm install -g acpx@latest mcporter@latest"
+  ]
+}

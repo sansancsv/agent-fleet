@@ -1,0 +1,64 @@
+# =============================================================================
+# ĐỊNH TUYẾN MODEL — chọn model theo LOẠI CÔNG VIỆC và MỨC NHẠY CẢM DỮ LIỆU
+# -----------------------------------------------------------------------------
+# Hai trục quyết định, không phải một:
+#   Trục 1 — độ khó công việc → chọn năng lực model
+#   Trục 2 — mức nhạy cảm dữ liệu → chọn NƠI model được phép chạy
+# Trục 2 luôn thắng. Dữ liệu mức "restricted" thì dù công việc khó đến đâu cũng
+# chỉ được dùng model tự host.
+# =============================================================================
+
+version: 1
+
+dataClasses:
+  public:       { allowedBackends: [claude, codex, gemini, local-llm] }
+  internal:     { allowedBackends: [claude, codex, gemini, local-llm] }
+  confidential: { allowedBackends: [claude, local-llm], requireZeroRetention: true }
+  restricted:   { allowedBackends: [local-llm], requireSelfHosted: true }
+
+taskTiers:
+  deep-reasoning:
+    when: ["thiết kế kiến trúc", "rà bảo mật", "phân tích sự cố phức tạp"]
+    primary: anthropic/claude-opus-4-6
+    fallbacks: [openai/gpt-5.4]
+    maxCostUsdPerCall: 3.0
+
+  workhorse:
+    when: ["viết code", "viết test", "vận hành thường ngày"]
+    primary: anthropic/claude-sonnet-4-6
+    fallbacks: [openai/gpt-5.4-codex, google/gemini-3-pro]
+    maxCostUsdPerCall: 1.0
+
+  cheap-bulk:
+    when: ["phân loại", "tóm tắt", "trích xuất", "định tuyến"]
+    primary: google/gemini-3-pro
+    fallbacks: [anthropic/claude-sonnet-4-6]
+    maxCostUsdPerCall: 0.15
+
+  sovereign:
+    when: ["dữ liệu tài chính", "hồ sơ nhân sự", "hợp đồng pháp lý"]
+    primary: openai-compatible/qwen3-coder-local
+    fallbacks: []
+    maxCostUsdPerCall: 0.0    # tự host, chi phí tính riêng theo hạ tầng
+
+# --- Ràng buộc đa dạng hoá ---------------------------------------------------
+# Đây là ràng buộc chất lượng, không phải chi phí: cùng một model vừa viết vừa
+# chấm sẽ bỏ sót cùng một loại lỗi. Bắt buộc khác NHÀ CUNG CẤP, không chỉ khác model.
+diversity:
+  crossReviewMustDifferByProvider: true
+  pairs:
+    - { producer: anthropic, reviewer: openai }
+    - { producer: openai,    reviewer: anthropic }
+    - { producer: google,    reviewer: anthropic }
+
+# --- Ngân sách ---------------------------------------------------------------
+budgets:
+  perTaskUsd: 8
+  perDayUsd: 400
+  perDepartmentPerMonthUsd:
+    engineering: 6000
+    marketing: 800
+    finance: 400
+    support: 600
+    legal: 400
+  onExceed: "block-and-notify"   # chặn và báo, KHÔNG âm thầm hạ cấp model

@@ -1,0 +1,6 @@
+{
+  "//": "Gói năng lực cho phòng Kỹ thuật. Dùng bởi profiles/engineering.yaml.",
+  "servers": ["github", "linear", "context7", "grafana", "fleet-internal", "postgres-readonly"],
+  "clis": ["fleet-github", "fleet-issues", "fleet-docs", "fleet-metrics", "fleet-svc"],
+  "writeAllowed": ["github", "linear"]
+}

@@ -1,0 +1,40 @@
+# Mỗi dịch vụ một ServiceAccount. Không dùng "default".
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: openclaw-gateway, namespace: fleet }
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: agent-runner, namespace: fleet }
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: fleet-sre, namespace: fleet }
+---
+# Vai trò SRE: được xem và rollback trong namespace prod, KHÔNG được xoá.
+# Đây là quyền duy nhất trong toàn fleet chạm tới cụm — và nó bị giới hạn tối đa.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: fleet-sre-actions, namespace: prod }
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events", "services", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets"]
+    verbs: ["get", "list", "watch", "patch"]   # patch = đủ để scale và rollback
+  - apiGroups: ["apps"]
+    resources: ["deployments/rollback", "deployments/scale"]
+    verbs: ["create", "update", "patch"]
+  # KHÔNG có "delete". Không có secrets. Không có ClusterRole.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: fleet-sre-binding, namespace: prod }
+subjects:
+  - kind: ServiceAccount
+    name: fleet-sre
+    namespace: fleet
+roleRef: { kind: Role, name: fleet-sre-actions, apiGroup: rbac.authorization.k8s.io }

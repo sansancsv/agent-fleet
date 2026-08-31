@@ -1,0 +1,54 @@
+# Mặc định CHẶN HẾT, rồi mở từng đường một.
+# Với một fleet agent, đây là biện pháp kiểm soát quan trọng nhất: kể cả khi
+# model bị dẫn dụ, nó cũng không có đường ra ngoài để mang dữ liệu đi.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: default-deny-all, namespace: fleet }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-dns, namespace: fleet }
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+---
+# CHỈ mcporter được gọi ra Internet. Mọi năng lực ngoài đi qua đúng một cửa,
+# nên chỉ cần giám sát một chỗ, và thu hồi quyền cũng chỉ ở một chỗ.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: mcporter-egress, namespace: fleet }
+spec:
+  podSelector: { matchLabels: { app: mcporter } }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.169.254/32]
+      ports: [{ protocol: TCP, port: 443 }]
+---
+# agent-runner KHÔNG được ra Internet trực tiếp; chỉ nói chuyện với mcporter,
+# và với các API model qua egress gateway có ghi log.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: agent-runner-egress, namespace: fleet }
+spec:
+  podSelector: { matchLabels: { app: agent-runner } }
+  policyTypes: [Egress]
+  egress:
+    - to: [{ podSelector: { matchLabels: { app: mcporter } } }]
+      ports: [{ protocol: TCP, port: 7420 }]
+    - to: [{ podSelector: { matchLabels: { app: llm-egress-gateway } } }]
+      ports: [{ protocol: TCP, port: 8443 }]
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports: [{ protocol: UDP, port: 53 }]

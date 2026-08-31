@@ -1,0 +1,65 @@
+{
+  "//": "acpx — cấu hình TOÀN CỤC. Mount vào ~/.acpx/config.json trong agent-runner.",
+  "//1": "Thứ tự ưu tiên: cờ CLI > .acpxrc.json của repo > file này.",
+  "//2": "Kiểm tra cấu hình đã hợp nhất: acpx config show",
+
+  "defaultAgent": "claude",
+
+  "//permissions": "approve-reads = cho đọc, chặn ghi/exec trừ khi được duyệt.",
+  "defaultPermissions": "approve-reads",
+
+  "//nonInteractive": "Trong CI/K8s không có TTY. 'fail' = dừng ngay và trả mã lỗi,",
+  "//nonInteractive2": "an toàn hơn 'deny' (âm thầm bỏ qua) vì buộc quy trình phải xử lý.",
+  "nonInteractivePermissions": "fail",
+
+  "//authPolicy": "'fail' = thiếu credential thì dừng, không chạy nửa vời.",
+  "authPolicy": "fail",
+
+  "//format": "json = NDJSON các thông điệp ACP thô, để n8n/LangGraph phân tích.",
+  "format": "json",
+
+  "//ttl": "0 = không tự huỷ phiên khi rỗi; vòng đời phiên do orchestrator quản.",
+  "ttl": 0,
+
+  "//timeout": "1800s = 30 phút cho một lượt. Bước dài hơn phải tách bước.",
+  "timeout": 1800,
+
+  "agents": {
+    "//": "Đăng ký các backend agent. Tên đặt trùng built-in sẽ ghi đè built-in.",
+
+    "claude": {
+      "argv": ["claude-code-acp"]
+    },
+    "codex": {
+      "argv": ["codex-acp", "--mode", "stable"]
+    },
+    "gemini": {
+      "argv": ["gemini", "--experimental-acp"]
+    },
+
+    "//custom": "Backend nội bộ: model tự host qua một ACP bridge do công ty viết.",
+    "local-llm": {
+      "argv": ["node", "/fleet/bin/local-acp-bridge.mjs", "--base-url", "${LOCAL_LLM_BASE_URL}"]
+    },
+
+    "//ci": "Hồ sơ riêng cho CI: cùng backend nhưng khoá chặt hơn.",
+    "ci-reviewer": {
+      "argv": ["codex-acp", "--mode", "stable", "--profile", "readonly"]
+    }
+  },
+
+  "mcpServers": [
+    {
+      "//": "Chỉ MỘT cầu nối duy nhất tới mcporter — xem capability-plane/.",
+      "name": "mcporter-bridge",
+      "type": "http",
+      "url": "${MCPORTER_BRIDGE_URL}",
+      "headers": { "Authorization": "Bearer ${MCPORTER_BRIDGE_TOKEN}" }
+    }
+  ],
+
+  "auth": {
+    "//": "Ưu tiên nạp qua biến môi trường ACPX_AUTH_<METHOD_ID> để không ghi khoá vào file.",
+    "//example": "ACPX_AUTH_ANTHROPIC_API_KEY, ACPX_AUTH_OPENAI_API_KEY, ACPX_AUTH_GEMINI_API_KEY"
+  }
+}

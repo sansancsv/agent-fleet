@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-runner
+  namespace: fleet
+  labels: { app: agent-runner, tier: execution }
+spec:
+  replicas: 3          # scale ngang thoải mái: mỗi lượt agent độc lập
+  selector: { matchLabels: { app: agent-runner } }
+  template:
+    metadata:
+      labels: { app: agent-runner, tier: execution }
+    spec:
+      serviceAccountName: agent-runner
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      # Runtime sandbox (gVisor/Kata). Agent chạy được lệnh tuỳ ý — container
+      # thường KHÔNG đủ ranh giới. Nếu cụm chưa có, ít nhất phải có NetworkPolicy
+      # chặn hết + không mount ServiceAccount token.
+      runtimeClassName: gvisor
+      containers:
+        - name: runner
+          image: registry.congty.vn/fleet/agent-runner:1.0.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          command: ["sleep", "infinity"]
+          env:
+            - { name: MCPORTER_BRIDGE_URL, value: "http://mcporter:7420/mcp" }
+            - { name: FLEET_REPO_ROOT, value: /srv/repos }
+            - { name: FLEET_LOG_DIR, value: /var/log/fleet }
+            - name: ACPX_AUTH_ANTHROPIC_API_KEY
+              valueFrom: { secretKeyRef: { name: fleet-model-keys, key: ANTHROPIC_API_KEY } }
+            - name: ACPX_AUTH_OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: fleet-model-keys, key: OPENAI_API_KEY } }
+            - name: ACPX_AUTH_GEMINI_API_KEY
+              valueFrom: { secretKeyRef: { name: fleet-model-keys, key: GEMINI_API_KEY } }
+          envFrom:
+            - secretRef: { name: fleet-service-tokens }
+          volumeMounts:
+            - { name: acpx-config, mountPath: /home/node/.acpx/config.json, subPath: config.json, readOnly: true }
+            - { name: repos, mountPath: /srv/repos }
+            - { name: logs,  mountPath: /var/log/fleet }
+            - { name: tmp,   mountPath: /tmp }
+          resources:
+            requests: { cpu: "1", memory: 2Gi }
+            limits:   { cpu: "4", memory: 8Gi }
+      volumes:
+        - { name: acpx-config, configMap: { name: acpx-config } }
+        - { name: repos, persistentVolumeClaim: { claimName: fleet-repos } }
+        - { name: logs,  emptyDir: { sizeLimit: 5Gi } }
+        - { name: tmp,   emptyDir: { sizeLimit: 10Gi } }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: agent-runner, namespace: fleet }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: agent-runner }
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
+  behavior:
+    # Thu nhỏ chậm: một lượt agent có thể chạy 30 phút, đừng giết giữa chừng.
+    scaleDown: { stabilizationWindowSeconds: 900, policies: [{ type: Pods, value: 1, periodSeconds: 300 }] }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: agent-runner, namespace: fleet }
+spec:
+  minAvailable: 1
+  selector: { matchLabels: { app: agent-runner } }

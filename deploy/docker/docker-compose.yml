@@ -1,0 +1,272 @@
+# =============================================================================
+# AGENT FLEET — ngăn xếp đầy đủ cho môi trường staging / máy phát triển
+# -----------------------------------------------------------------------------
+# 7 dịch vụ, 4 tầng:
+#   Tầng điều khiển  : openclaw-gateway     (cổng vào, định tuyến agent)
+#   Tầng năng lực    : mcporter             (một cầu nối MCP duy nhất)
+#   Tầng thực thi    : agent-runner         (acpx + các backend agent)
+#   Tầng điều phối   : langgraph, n8n(+worker)
+#   Hạ tầng          : postgres, redis
+#
+# Khởi động:  make up      (đọc .env ở thư mục gốc repo)
+# Kiểm tra:   make health
+# =============================================================================
+
+name: agent-fleet
+
+x-common-env: &common-env
+  TZ: Asia/Ho_Chi_Minh
+  FLEET_ENV: ${FLEET_ENV:-staging}
+  FLEET_LOG_DIR: /var/log/fleet
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "50m", max-file: "5" }
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # HẠ TẦNG
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-fleet}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD bắt buộc}
+      POSTGRES_DB: fleet
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-fleet} -d fleet"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+
+  # ---------------------------------------------------------------------------
+  # TẦNG NĂNG LỰC — mcporter: MỘT nguồn sự thật cho toàn bộ MCP server
+  # ---------------------------------------------------------------------------
+  mcporter:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.agent-runner
+    restart: unless-stopped
+    command: ["/fleet/capability-plane/bridge-up.sh"]
+    environment:
+      <<: *common-env
+      MCPORTER_BRIDGE_PORT: "7420"
+      MCPORTER_BRIDGE_BIND: "0.0.0.0"
+      MCPORTER_BRIDGE_TOKEN: ${MCPORTER_BRIDGE_TOKEN:?bắt buộc}
+      GITHUB_MCP_TOKEN: ${GITHUB_MCP_TOKEN:-}
+      GRAFANA_MCP_URL: ${GRAFANA_MCP_URL:-}
+      GRAFANA_SA_TOKEN: ${GRAFANA_SA_TOKEN:-}
+      DW_READONLY_DSN: ${DW_READONLY_DSN:-}
+      HUBSPOT_CLIENT_ID: ${HUBSPOT_CLIENT_ID:-}
+      HUBSPOT_CLIENT_SECRET: ${HUBSPOT_CLIENT_SECRET:-}
+    volumes:
+      - ../../capability-plane/mcporter.json:/home/node/.mcporter/mcporter.json:ro
+      - mcporter-cred:/home/node/.local/share/mcporter
+      - fleet-logs:/var/log/fleet
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7420/healthz || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *logging
+
+  # ---------------------------------------------------------------------------
+  # TẦNG ĐIỀU KHIỂN — OpenClaw Gateway
+  # ---------------------------------------------------------------------------
+  openclaw-gateway:
+    image: ghcr.io/openclaw/openclaw:${OPENCLAW_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      mcporter: { condition: service_healthy }
+    environment:
+      <<: *common-env
+      OPENCLAW_BIND: "0.0.0.0"
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?bắt buộc}
+      OPENCLAW_SANDBOX: "1"
+      MCPORTER_BRIDGE_URL: http://mcporter:7420/mcp
+      MCPORTER_BRIDGE_TOKEN: ${MCPORTER_BRIDGE_TOKEN}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      LOCAL_LLM_BASE_URL: ${LOCAL_LLM_BASE_URL:-}
+      LOCAL_LLM_API_KEY: ${LOCAL_LLM_API_KEY:-}
+      SLACK_BOT_TOKEN_ENGINEERING: ${SLACK_BOT_TOKEN_ENGINEERING:-}
+      SLACK_APP_TOKEN_ENGINEERING: ${SLACK_APP_TOKEN_ENGINEERING:-}
+      HOOK_SECRET_N8N: ${HOOK_SECRET_N8N:?bắt buộc}
+      HOOK_SECRET_GITHUB: ${HOOK_SECRET_GITHUB:-}
+    ports:
+      - "127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}:18789"
+    volumes:
+      - ../../control-plane/openclaw.json:/home/node/.openclaw/openclaw.json:ro
+      - ../../control-plane/config.d:/home/node/.openclaw/config.d:ro
+      - ../../control-plane/workspaces:/home/node/.openclaw/workspaces
+      - ../../distribution-plane/skills:/home/node/.openclaw/skills:ro
+      - openclaw-state:/home/node/.config/openclaw
+      - fleet-logs:/home/node/.openclaw/audit
+      # Docker socket CHỈ cần khi bật sandbox per-tool. Cân nhắc kỹ: đây là
+      # quyền tương đương root trên host. Ở K8s hãy dùng runtime sandbox thay thế.
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:18789/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+    logging: *logging
+
+  # ---------------------------------------------------------------------------
+  # TẦNG THỰC THI — acpx + các backend agent (nhân bản được)
+  # ---------------------------------------------------------------------------
+  agent-runner:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.agent-runner
+    restart: unless-stopped
+    depends_on:
+      mcporter: { condition: service_healthy }
+    environment:
+      <<: *common-env
+      MCPORTER_BRIDGE_URL: http://mcporter:7420/mcp
+      MCPORTER_BRIDGE_TOKEN: ${MCPORTER_BRIDGE_TOKEN}
+      ACPX_AUTH_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ACPX_AUTH_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ACPX_AUTH_GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      LOCAL_LLM_BASE_URL: ${LOCAL_LLM_BASE_URL:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      FLEET_REPO_ROOT: /srv/repos
+    volumes:
+      - ../../execution-plane/config/acpx.global.json:/home/node/.acpx/config.json:ro
+      - ../../execution-plane:/fleet/execution-plane:ro
+      - ../../capability-plane:/fleet/capability-plane:ro
+      - ../../profiles:/fleet/profiles:ro
+      - repos:/srv/repos
+      - acpx-state:/home/node/.acpx
+      - fleet-logs:/var/log/fleet
+    deploy:
+      replicas: ${AGENT_RUNNER_REPLICAS:-2}
+      resources:
+        limits: { cpus: "4", memory: 8G }
+    logging: *logging
+
+  # ---------------------------------------------------------------------------
+  # TẦNG ĐIỀU PHỐI — LangGraph (quy trình dài, bền vững, có người duyệt)
+  # ---------------------------------------------------------------------------
+  langgraph:
+    build:
+      context: ../../orchestration/langgraph
+      dockerfile: ../../deploy/docker/Dockerfile.langgraph
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      agent-runner: { condition: service_started }
+    environment:
+      <<: *common-env
+      FLEET_CHECKPOINT_DSN: postgresql://${PG_USER:-fleet}:${PG_PASSWORD}@postgres:5432/fleet_checkpoints
+      FLEET_REPO_ROOT: /srv/repos
+      MCPORTER_BRIDGE_URL: http://mcporter:7420/mcp
+      MCPORTER_BRIDGE_TOKEN: ${MCPORTER_BRIDGE_TOKEN}
+      ACPX_AUTH_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ACPX_AUTH_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ACPX_AUTH_GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    ports:
+      - "127.0.0.1:${LANGGRAPH_PORT:-2024}:8000"
+    volumes:
+      - repos:/srv/repos
+      - ../../execution-plane/config/acpx.global.json:/root/.acpx/config.json:ro
+      - fleet-logs:/var/log/fleet
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/ok || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 45s
+    logging: *logging
+
+  # ---------------------------------------------------------------------------
+  # TẦNG ĐIỀU PHỐI — n8n ở queue mode (bắt buộc cho môi trường thật)
+  # ---------------------------------------------------------------------------
+  n8n:
+    image: n8nio/n8n:${N8N_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment: &n8n-env
+      <<: *common-env
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: ${PG_USER:-fleet}
+      DB_POSTGRESDB_PASSWORD: ${PG_PASSWORD}
+      EXECUTIONS_MODE: queue
+      QUEUE_BULL_REDIS_HOST: redis
+      QUEUE_HEALTH_CHECK_ACTIVE: "true"
+      OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS: "true"
+      N8N_RUNNERS_ENABLED: "true"
+      # KHÔNG BAO GIỜ đổi khoá này sau khi đã lưu credential — đổi là mất hết.
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?bắt buộc, tối thiểu 32 ký tự}
+      EXECUTIONS_TIMEOUT: "3600"
+      EXECUTIONS_TIMEOUT_MAX: "7200"
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "336"
+      GENERIC_TIMEZONE: Asia/Ho_Chi_Minh
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      OPENCLAW_GATEWAY_URL: http://openclaw-gateway:18789
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+      LANGGRAPH_URL: http://langgraph:8000
+      LANGGRAPH_TOKEN: ${LANGGRAPH_TOKEN:-}
+      FLEET_PROFILE_API: http://langgraph:8000
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    ports:
+      - "127.0.0.1:${N8N_PORT:-5678}:5678"
+    volumes:
+      - n8ndata:/home/node/.n8n
+      - ../../orchestration/n8n/workflows:/workflows:ro
+    logging: *logging
+
+  n8n-worker:
+    image: n8nio/n8n:${N8N_TAG:-latest}
+    restart: unless-stopped
+    command: ["worker", "--concurrency=5"]
+    depends_on:
+      n8n: { condition: service_started }
+    environment: *n8n-env
+    volumes:
+      - n8ndata:/home/node/.n8n
+      - ../../execution-plane:/fleet/execution-plane:ro
+      - repos:/srv/repos
+      - fleet-logs:/var/log/fleet
+    deploy:
+      replicas: ${N8N_WORKER_REPLICAS:-2}
+    logging: *logging
+
+volumes:
+  pgdata:
+  redisdata:
+  n8ndata:
+  repos:
+  openclaw-state:
+  acpx-state:
+  mcporter-cred:
+  fleet-logs:

@@ -1,0 +1,38 @@
+name: Chăm sóc khách hàng
+dataClass: confidential
+
+requesters: ["*"]
+approvers: ["support-lead@congty.vn"]
+
+capabilityPack: support
+dataSources:
+  - "Notion: cơ sở tri thức, macro trả lời"
+  - "Linear: lỗi đã biết và trạng thái xử lý"
+  - "Kho dữ liệu: lịch sử ticket (đã ẩn danh)"
+
+agents:
+  classifier: gemini
+  drafter: claude
+  reviewer: gemini
+
+categories: [loi-ky-thuat, thanh-toan, huong-dan-su-dung, yeu-cau-tinh-nang, khieu-nai]
+
+reviewCriteria:
+  - "Không hứa thời hạn sửa lỗi khi chưa có trong Linear"
+  - "Không tiết lộ thông tin nội bộ hoặc thông tin khách hàng khác"
+  - "Giọng điệu đồng cảm nhưng không nhận lỗi thay pháp chế"
+  - "Có bước tiếp theo cụ thể cho khách hàng"
+
+systemPrompt: |
+  Trả lời ngắn, đi thẳng vào cách giải quyết. Nếu là lỗi đã biết, dẫn link trạng
+  thái. Nếu chưa biết, nói thật là chưa biết và nêu bước điều tra tiếp theo cùng
+  mốc thời gian phản hồi. Không bao giờ bịa số hiệu ticket.
+
+output:
+  server: linear
+  tool: save_comment
+  params: {}
+
+limits:
+  maxCostUsdPerRequest: 1
+  maxRevisions: 1

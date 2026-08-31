@@ -1,0 +1,6 @@
+{
+  "//": "Gói năng lực cho phòng Marketing. KHÔNG có quyền chạm mã nguồn.",
+  "servers": ["notion", "google-drive", "hubspot", "postgres-readonly"],
+  "clis": ["fleet-wiki", "fleet-drive", "fleet-query"],
+  "writeAllowed": ["notion", "google-drive"]
+}

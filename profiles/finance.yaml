@@ -1,0 +1,41 @@
+name: Tài chính
+dataClass: restricted        # dữ liệu KHÔNG được rời hạ tầng công ty
+
+requesters: ["finance-team@congty.vn", "cfo@congty.vn"]
+approvers: ["cfo@congty.vn"]   # bắt buộc khác người gửi yêu cầu
+
+capabilityPack: finance
+dataSources:
+  - "Kho dữ liệu: bảng tài chính (chỉ đọc, tài khoản readonly ở tầng CSDL)"
+  - "Google Drive: mẫu báo cáo"
+
+agents:
+  # dataClass=restricted → policies.py chỉ cho phép backend model tự host.
+  classifier: local-llm
+  drafter: local-llm
+  reviewer: local-llm
+
+categories: [bao-cao-thang, du-bao, phan-tich-chenh-lech, kiem-toan, khac]
+
+reviewCriteria:
+  - "Mọi con số truy được về một truy vấn cụ thể, có ghi câu truy vấn"
+  - "Kỳ báo cáo và đơn vị tiền tệ nêu rõ ở mọi bảng"
+  - "Chênh lệch > 5% phải có giải thích"
+  - "Không làm tròn theo hướng có lợi cho câu chuyện"
+  - "Không có dữ liệu định danh cá nhân trong đầu ra"
+
+systemPrompt: |
+  Bạn xử lý dữ liệu tài chính mức HẠN CHẾ. Không được gọi bất kỳ dịch vụ ngoài
+  nào. Không sao chép số liệu thô vào phần diễn giải. Mọi kết luận phải kèm
+  khoảng thời gian và nguồn. Khi cỡ mẫu nhỏ, nói thẳng là chưa kết luận được.
+
+output:
+  server: google-drive
+  tool: create_file
+  params:
+    folderId: "${DRIVE_FINANCE_REPORTS_FOLDER}"
+    mimeType: "application/vnd.google-apps.document"
+
+limits:
+  maxCostUsdPerRequest: 2
+  maxRevisions: 1

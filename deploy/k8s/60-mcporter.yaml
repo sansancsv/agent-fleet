@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcporter
+  namespace: fleet
+  labels: { app: mcporter, tier: capability }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: mcporter } }
+  template:
+    metadata:
+      labels: { app: mcporter, tier: capability }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: mcporter
+          image: registry.congty.vn/fleet/agent-runner:1.0.0
+          command: ["/fleet/capability-plane/bridge-up.sh"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          ports: [{ name: bridge, containerPort: 7420 }]
+          env:
+            - { name: MCPORTER_BRIDGE_PORT, value: "7420" }
+            - { name: MCPORTER_BRIDGE_BIND, value: "0.0.0.0" }
+          envFrom:
+            - secretRef: { name: fleet-service-tokens }
+            - secretRef: { name: fleet-mcp-credentials }
+          volumeMounts:
+            - { name: config, mountPath: /home/node/.mcporter/mcporter.json, subPath: mcporter.json, readOnly: true }
+            - { name: cache,  mountPath: /home/node/.cache/mcporter }
+          readinessProbe:
+            httpGet: { path: /healthz, port: bridge }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits:   { cpu: "2",  memory: 2Gi }
+      volumes:
+        - { name: config, configMap: { name: mcporter-config } }
+        - { name: cache,  emptyDir: { sizeLimit: 1Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: mcporter, namespace: fleet }
+spec:
+  selector: { app: mcporter }
+  ports: [{ name: bridge, port: 7420, targetPort: bridge }]

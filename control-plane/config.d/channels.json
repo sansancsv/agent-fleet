@@ -1,0 +1,71 @@
+// =============================================================================
+// CHANNELS — các kênh chat mà con người dùng để nói chuyện với fleet
+// -----------------------------------------------------------------------------
+// Mỗi PHÒNG BAN nên có một `accountId` riêng (một bot riêng), vì:
+//   - phân quyền theo phòng ban làm ở tầng binding, không phải trong prompt;
+//   - thu hồi quyền = tắt một bot, không ảnh hưởng phòng ban khác;
+//   - hoá đơn và audit tách bạch theo accountId.
+// =============================================================================
+{
+  channels: {
+    slack: {
+      enabled: true,
+      accounts: {
+        "acc-engineering": {
+          botToken: { source: "env", id: "SLACK_BOT_TOKEN_ENGINEERING" },
+          appToken: { source: "env", id: "SLACK_APP_TOKEN_ENGINEERING" },
+          dmPolicy: "allowlist",
+          groupPolicy: "allowlist",
+          requireMention: true,
+        },
+        "acc-marketing": {
+          botToken: { source: "env", id: "SLACK_BOT_TOKEN_MARKETING" },
+          appToken: { source: "env", id: "SLACK_APP_TOKEN_MARKETING" },
+          dmPolicy: "allowlist",
+          requireMention: true,
+        },
+        "acc-finance": {
+          botToken: { source: "env", id: "SLACK_BOT_TOKEN_FINANCE" },
+          appToken: { source: "env", id: "SLACK_APP_TOKEN_FINANCE" },
+          dmPolicy: "allowlist",
+          requireMention: true,
+        },
+      },
+    },
+
+    telegram: {
+      enabled: false, // bật khi cần kênh cảnh báo ngoài giờ cho SRE
+      accounts: {
+        alerts: { botToken: { source: "env", id: "TELEGRAM_BOT_TOKEN_ALERTS" }, dmPolicy: "allowlist" },
+      },
+    },
+
+    discord: { enabled: false },
+    whatsapp: { enabled: false },
+  },
+
+  // --- Webhook ingress: nơi n8n / GitHub / Linear đẩy sự kiện vào fleet ------
+  hooks: {
+    enabled: true,
+    entries: {
+      // n8n gọi vào đây khi một quy trình xác định cần một bước phi xác định.
+      "n8n-dispatch": {
+        path: "/hooks/n8n-dispatch",
+        auth: { mode: "hmac", secret: { source: "env", id: "HOOK_SECRET_N8N" } },
+        agentId: "orchestrator",
+      },
+      // GitHub gửi pull_request events → kích hoạt reviewer.
+      "github-pr": {
+        path: "/hooks/github-pr",
+        auth: { mode: "hmac", secret: { source: "env", id: "HOOK_SECRET_GITHUB" } },
+        agentId: "reviewer",
+      },
+      // Alertmanager → SRE.
+      "alerts": {
+        path: "/hooks/alerts",
+        auth: { mode: "bearer", token: { source: "env", id: "HOOK_TOKEN_ALERTS" } },
+        agentId: "sre",
+      },
+    },
+  },
+}

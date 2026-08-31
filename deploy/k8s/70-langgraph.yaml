@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langgraph
+  namespace: fleet
+  labels: { app: langgraph, tier: orchestration }
+spec:
+  replicas: 2      # scale được vì trạng thái nằm ở PostgreSQL, không nằm trong pod
+  selector: { matchLabels: { app: langgraph } }
+  template:
+    metadata:
+      labels: { app: langgraph, tier: orchestration }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: langgraph
+          image: registry.congty.vn/fleet/langgraph:1.0.0
+          ports: [{ name: http, containerPort: 8000 }]
+          env:
+            - name: FLEET_CHECKPOINT_DSN
+              valueFrom: { secretKeyRef: { name: fleet-db, key: checkpointDsn } }
+            - { name: FLEET_REPO_ROOT, value: /srv/repos }
+            - { name: MCPORTER_BRIDGE_URL, value: "http://mcporter:7420/mcp" }
+          envFrom:
+            - secretRef: { name: fleet-model-keys }
+            - secretRef: { name: fleet-service-tokens }
+          volumeMounts:
+            - { name: repos, mountPath: /srv/repos }
+          readinessProbe:
+            httpGet: { path: /ok, port: http }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits:   { cpu: "2",  memory: 4Gi }
+      volumes:
+        - { name: repos, persistentVolumeClaim: { claimName: fleet-repos } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: langgraph, namespace: fleet }
+spec:
+  selector: { app: langgraph }
+  ports: [{ name: http, port: 8000, targetPort: http }]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: fleet-repos, namespace: fleet }
+spec:
+  accessModes: [ReadWriteMany]      # nhiều pod cùng đọc/ghi worktree
+  resources: { requests: { storage: 200Gi } }

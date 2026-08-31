@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openclaw-gateway
+  namespace: fleet
+  labels: { app: openclaw-gateway, tier: control-plane }
+spec:
+  replicas: 1        # Gateway giữ trạng thái phiên trên đĩa → KHÔNG scale ngang
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: openclaw-gateway } }
+  template:
+    metadata:
+      labels: { app: openclaw-gateway, tier: control-plane }
+    spec:
+      serviceAccountName: openclaw-gateway
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: gateway
+          image: ghcr.io/openclaw/openclaw:2026.8.1   # GHIM PHIÊN BẢN
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false   # gateway ghi state + sqlite
+            capabilities: { drop: ["ALL"] }
+          ports: [{ name: http, containerPort: 18789 }]
+          env:
+            - { name: OPENCLAW_BIND, value: "0.0.0.0" }
+            - { name: TZ, value: Asia/Ho_Chi_Minh }
+            - { name: MCPORTER_BRIDGE_URL, value: "http://mcporter:7420/mcp" }
+          envFrom:
+            - secretRef: { name: fleet-model-keys }
+            - secretRef: { name: fleet-service-tokens }
+          volumeMounts:
+            - { name: config,     mountPath: /home/node/.openclaw/openclaw.json, subPath: openclaw.json, readOnly: true }
+            - { name: configd,    mountPath: /home/node/.openclaw/config.d, readOnly: true }
+            - { name: skills,     mountPath: /home/node/.openclaw/skills, readOnly: true }
+            - { name: state,      mountPath: /home/node/.openclaw }
+          startupProbe:
+            httpGet: { path: /startupz, port: http }
+            failureThreshold: 30
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits:   { cpu: "2",  memory: 4Gi }
+      volumes:
+        - { name: config,  configMap: { name: openclaw-config } }
+        - { name: configd, configMap: { name: openclaw-configd } }
+        - { name: skills,  configMap: { name: fleet-skills } }
+        - { name: state,   persistentVolumeClaim: { claimName: openclaw-state } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: openclaw-gateway, namespace: fleet }
+spec:
+  selector: { app: openclaw-gateway }
+  ports: [{ name: http, port: 18789, targetPort: http }]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: openclaw-state, namespace: fleet }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 20Gi } }

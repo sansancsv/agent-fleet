@@ -1,0 +1,41 @@
+name: Marketing
+dataClass: internal
+
+requesters: ["*"]
+approvers: ["marketing-lead@congty.vn", "brand@congty.vn"]
+
+capabilityPack: marketing
+dataSources:
+  - "Notion: hướng dẫn thương hiệu, thông điệp sản phẩm"
+  - "Google Drive: tài liệu chiến dịch"
+  - "HubSpot: chân dung khách hàng, hiệu quả chiến dịch (chỉ đọc)"
+  - "Kho dữ liệu: chỉ số chiến dịch (chỉ đọc)"
+
+agents:
+  classifier: gemini
+  drafter: claude
+  reviewer: gemini
+
+categories: [email, bai-blog, mang-xa-hoi, thong-cao, trang-dich, khac]
+
+reviewCriteria:
+  - "Đúng giọng thương hiệu theo hướng dẫn trong Notion"
+  - "Không hứa hẹn tính năng chưa phát hành"
+  - "Không nêu số liệu không có nguồn"
+  - "Có lời kêu gọi hành động rõ ràng, đúng một lời kêu gọi chính"
+  - "Tuân thủ quảng cáo: không so sánh trực tiếp với đối thủ bằng tên"
+
+systemPrompt: |
+  Viết bằng tiếng Việt tự nhiên, không dịch máy. Câu ngắn. Không dùng sáo ngữ
+  marketing ("giải pháp toàn diện", "đột phá"). Mỗi tuyên bố về sản phẩm phải
+  truy được về một nguồn trong Notion. Khi không chắc, ghi [CẦN KIỂM CHỨNG].
+
+output:
+  server: notion
+  tool: notion-create-pages
+  params:
+    parentPageId: "${NOTION_MARKETING_DRAFTS_PAGE}"
+
+limits:
+  maxCostUsdPerRequest: 3
+  maxRevisions: 2

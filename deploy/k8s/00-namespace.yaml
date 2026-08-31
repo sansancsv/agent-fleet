@@ -1,0 +1,36 @@
+# Không gian tên riêng cho fleet + nhãn để NetworkPolicy bám vào.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fleet
+  labels:
+    name: fleet
+    # Pod Security Admission ở mức "restricted": cấm chạy root, cấm privileged,
+    # bắt buộc seccomp. Đây là hàng rào cuối khi cấu hình ứng dụng có sai sót.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: fleet-quota
+  namespace: fleet
+spec:
+  hard:
+    requests.cpu: "32"
+    requests.memory: 64Gi
+    limits.cpu: "64"
+    limits.memory: 128Gi
+    persistentvolumeclaims: "12"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: fleet-defaults
+  namespace: fleet
+spec:
+  limits:
+    - type: Container
+      default: { cpu: "2", memory: 4Gi }
+      defaultRequest: { cpu: 200m, memory: 512Mi }
+      max: { cpu: "8", memory: 16Gi }

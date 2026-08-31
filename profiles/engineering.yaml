@@ -1,0 +1,40 @@
+name: Kỹ thuật
+dataClass: internal
+
+requesters: ["*"]
+approvers: ["tech-lead@congty.vn", "eng-manager@congty.vn"]
+
+capabilityPack: engineering
+dataSources:
+  - "GitHub: mã nguồn, PR, issue"
+  - "Linear: công việc và chu kỳ"
+  - "Context7: tài liệu thư viện"
+  - "Grafana: chỉ số và log production"
+
+agents:
+  classifier: codex
+  drafter: claude
+  reviewer: codex          # khác drafter — đây là điểm mấu chốt
+
+categories: [trivial, standard, risky]
+
+reviewCriteria:
+  - "Đúng sai: biên, null, tranh chấp đồng thời, lỗi bị nuốt im lặng"
+  - "Bảo mật: đầu vào người dùng chạm tới lệnh/truy vấn/đường dẫn ở đâu"
+  - "Hiệu năng: truy vấn N+1, vòng lặp lồng nhau, tải hết vào bộ nhớ"
+  - "Test: mỗi lỗi được sửa phải có test hồi quy"
+
+systemPrompt: |
+  Bạn làm việc trong repo sản xuất. Đọc code trước khi sửa, không đoán API.
+  Thay đổi tối thiểu. Chạy 'make test lint' cho tới khi xanh. Không tự merge.
+
+output:
+  server: github
+  tool: create_pull_request
+  params:
+    draft: true
+    base: main
+
+limits:
+  maxCostUsdPerRequest: 8
+  maxRevisions: 2

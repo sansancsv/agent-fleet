@@ -1,0 +1,217 @@
+{
+  "name": "Fleet · Tiếp nhận & định tuyến yêu cầu",
+  "meta": {
+    "description": "Cửa vào duy nhất cho mọi yêu cầu từ các phòng ban. Đây là tầng XÁC ĐỊNH: xác thực, kiểm tra quyền, phân loại, rồi mới chuyển sang tầng agent. Không có model nào được gọi trước khi qua hai chốt kiểm tra đầu tiên — đó là cách chặn cả rò rỉ dữ liệu lẫn cháy hoá đơn."
+  },
+  "settings": { "executionOrder": "v1", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "all", "timezone": "Asia/Ho_Chi_Minh" },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fleet/intake",
+        "authentication": "headerAuth",
+        "options": { "rawBody": false }
+      },
+      "id": "n-webhook",
+      "name": "Yêu cầu vào (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-560, 300],
+      "webhookId": "fleet-intake",
+      "notesInFlow": true,
+      "notes": "Nguồn: Slack slash-command, form nội bộ, Linear webhook, email parser."
+    },
+    {
+      "parameters": {
+        "jsCode": "// CHỐT 1 — Chuẩn hoá và làm sạch đầu vào.\n// Mọi thứ đến từ bên ngoài đều là DỮ LIỆU KHÔNG TIN CẬY.\n// Ta không bao giờ ghép thẳng vào prompt mà không bọc thẻ <untrusted>.\nconst body = $input.first().json.body ?? $input.first().json;\n\nconst clean = (s, max) => String(s ?? '')\n  .replace(/\\u0000/g, '')\n  .slice(0, max);\n\nreturn [{\n  json: {\n    requestId: `REQ-${Date.now().toString(36).toUpperCase()}`,\n    profile:   clean(body.profile, 40)   || 'engineering',\n    requester: clean(body.requester, 80),\n    request:   clean(body.request, 8000),\n    repo:      clean(body.repo, 200),\n    priority:  ['low','normal','high','urgent'].includes(body.priority) ? body.priority : 'normal',\n    receivedAt: new Date().toISOString(),\n  }\n}];"
+      },
+      "id": "n-normalize",
+      "name": "Chuẩn hoá đầu vào",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-340, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.FLEET_PROFILE_API }}/profiles/{{ $json.profile }}/authorize",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.FLEET_PROFILE_TOKEN }}" }] },
+        "sendQuery": true,
+        "queryParameters": { "parameters": [{ "name": "requester", "value": "={{ $json.requester }}" }] },
+        "options": { "timeout": 8000, "response": { "response": { "neverError": true } } }
+      },
+      "id": "n-authz",
+      "name": "CHỐT 2 · Kiểm tra quyền",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-120, 300],
+      "notes": "Quyền được kiểm ở đây, KHÔNG kiểm trong prompt. Prompt có thể bị dẫn dụ; HTTP 403 thì không."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.allowed }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "n-if-authz",
+      "name": "Được phép?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "version": 2 },
+                "conditions": [{
+                  "leftValue": "={{ $('Chuẩn hoá đầu vào').item.json.request }}",
+                  "rightValue": "(?i)(deploy|rollback|sự cố|incident|production down)",
+                  "operator": { "type": "string", "operation": "regex" }
+                }],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "van-hanh"
+            },
+            {
+              "conditions": {
+                "options": { "version": 2 },
+                "conditions": [{
+                  "leftValue": "={{ $('Chuẩn hoá đầu vào').item.json.profile }}",
+                  "rightValue": "engineering",
+                  "operator": { "type": "string", "operation": "equals" }
+                }],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ky-thuat"
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra", "renameFallbackOutput": "phong-ban-khac" }
+      },
+      "id": "n-switch",
+      "name": "Định tuyến theo loại",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [340, 200],
+      "notes": "Đây là điểm nối giữa quy trình XÁC ĐỊNH (n8n) và phần PHI XÁC ĐỊNH (agent). Việc phân luồng làm bằng luật, không bằng model — rẻ hơn, nhanh hơn, kiểm toán được."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENCLAW_GATEWAY_URL }}/hooks/n8n-dispatch",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Authorization", "value": "=Bearer {{ $env.OPENCLAW_GATEWAY_TOKEN }}" },
+          { "name": "X-Fleet-Request-Id", "value": "={{ $('Chuẩn hoá đầu vào').item.json.requestId }}" }
+        ]},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ agentId: 'sre', prompt: $('Chuẩn hoá đầu vào').item.json.request, meta: { requestId: $('Chuẩn hoá đầu vào').item.json.requestId, priority: 'urgent' } }) }}",
+        "options": { "timeout": 120000 }
+      },
+      "id": "n-to-sre",
+      "name": "→ SRE (khẩn cấp)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [600, 60]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LANGGRAPH_URL }}/runs/wait",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.LANGGRAPH_TOKEN }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ assistant_id: 'fleet', input: { task_id: $('Chuẩn hoá đầu vào').item.json.requestId, title: $('Chuẩn hoá đầu vào').item.json.request, repo: $('Chuẩn hoá đầu vào').item.json.repo, profile: 'engineering', requester: $('Chuẩn hoá đầu vào').item.json.requester }, config: { configurable: { thread_id: $('Chuẩn hoá đầu vào').item.json.requestId } } }) }}",
+        "options": { "timeout": 900000 }
+      },
+      "id": "n-to-langgraph",
+      "name": "→ LangGraph (quy trình dài)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [600, 220],
+      "notes": "Việc kỹ thuật nhiều bước, có người duyệt giữa chừng → LangGraph, vì nó lưu checkpoint và chịu được pod restart. n8n không giữ trạng thái hàng giờ tốt bằng."
+    },
+    {
+      "parameters": {
+        "command": "=/fleet/execution-plane/scripts/run-role.sh analyst /srv/data \"{{ $('Chuẩn hoá đầu vào').item.json.request.replace(/\"/g, '\\\\\"') }}\""
+      },
+      "id": "n-to-dept",
+      "name": "→ Agent phòng ban",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [600, 380],
+      "notes": "Yêu cầu ngắn của phòng ban ngoài kỹ thuật: gọi thẳng một lượt agent, không cần đồ thị."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ghi nhật ký kiểm toán cho MỌI yêu cầu — kể cả yêu cầu bị từ chối.\n// Nhật ký này là thứ duy nhất trả lời được câu hỏi\n// \"tháng trước ai đã bảo agent làm gì\" khi có kiểm toán.\nconst src = $('Chuẩn hoá đầu vào').item.json;\nreturn [{ json: {\n  ts: new Date().toISOString(),\n  requestId: src.requestId,\n  requester: src.requester,\n  profile: src.profile,\n  route: $runIndex,\n  outcome: 'dispatched',\n} }];"
+      },
+      "id": "n-audit",
+      "name": "Ghi nhật ký kiểm toán",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 220]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: 'Không có quyền gửi yêu cầu cho hồ sơ này', requestId: $('Chuẩn hoá đầu vào').item.json.requestId }) }}",
+        "options": { "responseCode": 403 }
+      },
+      "id": "n-deny",
+      "name": "Từ chối (403)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [340, 460]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, requestId: $('Chuẩn hoá đầu vào').item.json.requestId }) }}"
+      },
+      "id": "n-ok",
+      "name": "Phản hồi",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1080, 220]
+    }
+  ],
+  "connections": {
+    "Yêu cầu vào (Webhook)": { "main": [[{ "node": "Chuẩn hoá đầu vào", "type": "main", "index": 0 }]] },
+    "Chuẩn hoá đầu vào": { "main": [[{ "node": "CHỐT 2 · Kiểm tra quyền", "type": "main", "index": 0 }]] },
+    "CHỐT 2 · Kiểm tra quyền": { "main": [[{ "node": "Được phép?", "type": "main", "index": 0 }]] },
+    "Được phép?": {
+      "main": [
+        [{ "node": "Định tuyến theo loại", "type": "main", "index": 0 }],
+        [{ "node": "Từ chối (403)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Định tuyến theo loại": {
+      "main": [
+        [{ "node": "→ SRE (khẩn cấp)", "type": "main", "index": 0 }],
+        [{ "node": "→ LangGraph (quy trình dài)", "type": "main", "index": 0 }],
+        [{ "node": "→ Agent phòng ban", "type": "main", "index": 0 }]
+      ]
+    },
+    "→ SRE (khẩn cấp)": { "main": [[{ "node": "Ghi nhật ký kiểm toán", "type": "main", "index": 0 }]] },
+    "→ LangGraph (quy trình dài)": { "main": [[{ "node": "Ghi nhật ký kiểm toán", "type": "main", "index": 0 }]] },
+    "→ Agent phòng ban": { "main": [[{ "node": "Ghi nhật ký kiểm toán", "type": "main", "index": 0 }]] },
+    "Ghi nhật ký kiểm toán": { "main": [[{ "node": "Phản hồi", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {}
+}

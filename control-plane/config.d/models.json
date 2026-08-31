@@ -1,0 +1,51 @@
+// =============================================================================
+// MODELS — sổ đăng ký model (model registry) và chính sách định tuyến
+// -----------------------------------------------------------------------------
+// Ba nguyên tắc enterprise:
+//   1. KHÔNG khoá vào một nhà cung cấp. Mỗi lớp công việc có ít nhất 2 nguồn.
+//   2. Model đắt chỉ dùng cho việc "một lần, hệ quả lớn" (thiết kế, review bảo mật).
+//   3. Fallback là để chống rate-limit / sự cố nhà cung cấp, KHÔNG phải để
+//      hạ chất lượng âm thầm — mọi lần fallback đều ghi log (xem security.json).
+//
+// Alias dùng trong chat:  "@architect dùng Opus phân tích..."  → alias "Opus".
+// =============================================================================
+{
+  agents: {
+    defaults: {
+      models: {
+        // --- Lớp suy luận sâu (deep reasoning) — thiết kế, review, bảo mật ----
+        "anthropic/claude-opus-4-6": {
+          alias: "Opus",
+          params: { temperature: 0.2, maxOutputTokens: 16000 },
+        },
+        // --- Lớp làm việc chính (workhorse) — viết code, test, vận hành ------
+        "anthropic/claude-sonnet-4-6": {
+          alias: "Sonnet",
+          params: { temperature: 0.1, maxOutputTokens: 12000 },
+        },
+        // --- Lớp kiểm chứng chéo (cross-check) — khác nhà cung cấp -----------
+        "openai/gpt-5.4": {
+          alias: "GPT",
+          params: { temperature: 0.1 },
+        },
+        "openai/gpt-5.4-codex": {
+          alias: "Codex",
+          params: { temperature: 0.0 },
+        },
+        // --- Lớp ngữ cảnh dài / chi phí thấp (long context, low cost) --------
+        "google/gemini-3-pro": {
+          alias: "Gemini",
+          params: { temperature: 0.2 },
+        },
+        // --- Model nội bộ / chủ quyền dữ liệu (self-hosted) ------------------
+        // Dùng cho dữ liệu không được rời hạ tầng công ty (HR, pháp chế, tài chính).
+        "openai-compatible/qwen3-coder-local": {
+          alias: "Local",
+          baseUrl: "${LOCAL_LLM_BASE_URL:-http://vllm.fleet.svc.cluster.local:8000/v1}",
+          apiKey: { source: "env", id: "LOCAL_LLM_API_KEY" },
+          params: { temperature: 0.1 },
+        },
+      },
+    },
+  },
+}

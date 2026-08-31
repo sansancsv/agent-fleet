@@ -1,0 +1,80 @@
+# =============================================================================
+# CHÍNH SÁCH CÔNG CỤ (tool policy) — nguồn sự thật về "ai được làm gì"
+# -----------------------------------------------------------------------------
+# File này là bản mô tả bằng người đọc được của các quyền đang được cưỡng chế ở
+# ba nơi khác nhau (phòng thủ nhiều lớp):
+#   1. openclaw.json  → tools.allow / tools.deny cho từng agent
+#   2. acpx           → --approve-all / --approve-reads / --deny-all
+#   3. mcporter.json  → allowedTools / blockedTools cho từng MCP server
+#   4. Kubernetes     → RBAC + NetworkPolicy
+#
+# Quy tắc vàng: MỘT quyền phải bị chặn ở ÍT NHẤT HAI tầng. Một tầng cấu hình sai
+# thì tầng còn lại vẫn giữ. `scripts/validate.sh` kiểm tra tính nhất quán này.
+# =============================================================================
+
+version: 1
+
+capabilities:
+  read:   "Đọc file trong workspace"
+  search: "Tìm kiếm trong mã nguồn"
+  write:  "Ghi/sửa/tạo file"
+  exec:   "Chạy lệnh shell"
+  fetch:  "Gọi mạng ra ngoài"
+  agent:  "Gọi agent khác"
+
+roles:
+  orchestrator:
+    grant: [read, search, fetch, exec, agent]
+    deny:  [write]
+    rationale: "Điều phối, không tự làm. Có exec để mở flow, không có write để không lặng lẽ sửa code."
+
+  architect:
+    grant: [read, search, fetch, write]
+    deny:  [exec, agent]
+    rationale: "Ghi tài liệu, không chạy lệnh."
+
+  implementer:
+    grant: [read, search, fetch, write, exec]
+    deny:  []
+    rationale: "Vai trò DUY NHẤT toàn quyền trong repo. Luôn trên worktree riêng, luôn qua PR."
+    extraControls:
+      - "Không được push vào nhánh mặc định (bảo vệ nhánh ở GitHub)"
+      - "Sandbox network=restricted: chỉ registry gói và mcporter"
+
+  tester:
+    grant: [read, search, write, exec]
+    deny:  [fetch, agent]
+    rationale: "Chạy test offline. Không mạng để test không phụ thuộc dịch vụ ngoài."
+
+  reviewer:
+    grant: [read, search]
+    deny:  [write, exec, fetch, agent]
+    rationale: "Độc lập tuyệt đối. Không sửa được thứ mình đang chấm."
+
+  security:
+    grant: [read, search, exec]
+    deny:  [write, fetch, agent]
+    rationale: "Cần exec để chạy trình quét; không mạng để kết quả quét không bị rò ra ngoài."
+
+  docs-writer:
+    grant: [read, search, fetch, write]
+    deny:  [exec, agent]
+
+  sre:
+    grant: [read, search, fetch, exec]
+    deny:  [write, agent]
+    rationale: "Chạm cụm được nhưng không sửa mã nguồn. RBAC K8s không cho delete."
+
+  analyst:
+    grant: [read, search, fetch]
+    deny:  [write, exec, agent]
+
+# --- Những thứ KHÔNG agent nào được làm, bất kể vai trò ----------------------
+globalDeny:
+  - "git push --force vào bất kỳ nhánh nào"
+  - "Sửa lịch sử nhánh đã chia sẻ (rebase/amend commit đã push)"
+  - "Xoá dữ liệu production (DROP, DELETE không WHERE, kubectl delete)"
+  - "Đọc hoặc ghi biến môi trường chứa secret rồi in ra đầu ra"
+  - "Tự cấp thêm quyền cho chính mình hoặc agent khác"
+  - "Tắt/ sửa cấu hình kiểm toán và giám sát"
+  - "Gọi thẳng API model bằng curl (bỏ qua tầng ghi log)"

@@ -1,0 +1,126 @@
+# Cài đặt
+
+## A. Máy phát triển / staging (Docker Compose)
+
+### 1. Điều kiện tiên quyết
+```bash
+node --version      # cần >= 22, khuyến nghị 24
+python3 --version   # cần >= 3.12
+docker compose version
+```
+
+### 2. Bootstrap
+```bash
+./bootstrap.sh
+```
+Script này: kiểm tra công cụ → cài `acpx`, `mcporter`, `clawhub`, `openclaw`
+toàn cục → tạo `.env` với khoá nội bộ sinh ngẫu nhiên (`openssl rand -hex 32`)
+→ đặt quyền file → chạy kiểm chứng cấu hình.
+
+Chạy lại nhiều lần được: mỗi bước tự kiểm tra trước khi làm, và **không ghi đè
+`.env` đã có**.
+
+### 3. Điền khoá nhà cung cấp model
+```bash
+$EDITOR .env
+# ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
+# GEMINI_API_KEY=...
+```
+
+Nếu có dữ liệu mức `confidential`/`restricted` (tài chính, nhân sự, pháp chế),
+cần thêm một model tự host:
+```bash
+# LOCAL_LLM_BASE_URL=http://vllm:8000/v1
+```
+
+### 4. Khởi động
+```bash
+make up        # dựng ảnh + khởi động 7 dịch vụ
+make health    # 4 kiểm tra sức khoẻ
+```
+
+Cổng mở ra (chỉ trên loopback, không ra ngoài máy):
+- `18789` — OpenClaw Gateway
+- `5678`  — n8n
+- `2024`  — LangGraph
+
+### 5. Cấu hình sau khi chạy
+```bash
+make agents             # xem đội hình + luật định tuyến
+make capability         # sinh CLI từ MCP server
+make import-workflows   # nhập workflow n8n từ git
+make audit              # rà soát bảo mật + test chính sách OPA
+```
+
+### 6. Kết nối Slack
+```bash
+docker compose -f deploy/docker/docker-compose.yml exec openclaw-gateway \
+  openclaw channels login --channel slack --account acc-engineering
+```
+Rồi thêm ID kênh Slack thật vào `control-plane/config.d/bindings.json`
+(thay `C_FLEET_ARCH`, `C_FLEET_REVIEW`, …). Gateway tự nạp lại cấu hình.
+
+---
+
+## B. Kubernetes (production)
+
+### Thứ tự áp dụng
+```bash
+kubectl apply -f deploy/k8s/00-namespace.yaml
+kubectl apply -f deploy/k8s/10-rbac.yaml
+kubectl apply -f deploy/k8s/20-networkpolicy.yaml   # TRƯỚC khi có pod nào chạy
+kubectl apply -f deploy/k8s/30-secrets.yaml         # cần External Secrets Operator
+# Tạo ConfigMap từ cấu hình trong git:
+kubectl -n fleet create configmap openclaw-config  --from-file=control-plane/openclaw.json
+kubectl -n fleet create configmap openclaw-configd --from-file=control-plane/config.d/
+kubectl -n fleet create configmap mcporter-config  --from-file=capability-plane/mcporter.json
+kubectl -n fleet create configmap acpx-config      --from-file=config.json=execution-plane/config/acpx.global.json
+kubectl -n fleet create configmap fleet-skills     --from-file=distribution-plane/skills/
+kubectl apply -f deploy/k8s/60-mcporter.yaml
+kubectl apply -f deploy/k8s/40-openclaw-gateway.yaml
+kubectl apply -f deploy/k8s/50-agent-runner.yaml
+kubectl apply -f deploy/k8s/70-langgraph.yaml
+```
+
+### Năm điểm bắt buộc trước khi cho người thật dùng
+
+1. **Ghim phiên bản ảnh.** Không dùng `:latest`. Sự cố với `latest` không tái
+   hiện được, và đó là loại sự cố tệ nhất.
+
+2. **Runtime sandbox.** `runtimeClassName: gvisor` (hoặc Kata) cho
+   `agent-runner`. Agent chạy được lệnh tuỳ ý — container thường không đủ ranh
+   giới. Nếu cụm chưa có, tối thiểu phải: NetworkPolicy chặn hết +
+   `automountServiceAccountToken: false` + Pod Security `restricted`.
+
+3. **NetworkPolicy áp dụng trước.** Áp dụng sau khi pod đã chạy là để hở một
+   khoảng thời gian. Áp dụng trước.
+
+4. **Secret không nằm trong git.** Dùng External Secrets Operator kéo từ Vault.
+   `30-secrets.yaml` có sẵn cấu hình mẫu.
+
+5. **PVC `fleet-repos` phải là ReadWriteMany.** Nhiều `agent-runner` cùng đọc/ghi
+   worktree. RWO sẽ khiến pod thứ hai không khởi động được.
+
+### Gateway không scale ngang
+`openclaw-gateway` giữ phiên trong SQLite trên PVC → `replicas: 1`,
+`strategy: Recreate`. Cần chịu tải cao hơn thì chạy nhiều gateway, mỗi gateway
+một tập phòng ban, không phải nhiều bản sao của cùng một gateway.
+
+---
+
+## C. Kiểm chứng sau khi cài
+
+```bash
+./scripts/validate.sh
+```
+
+10 nhóm kiểm tra, trong đó ba nhóm là **kiểm tra nhất quán** — quan trọng hơn
+kiểm tra cú pháp:
+
+- Vai trò trong `openclaw.json` phải khớp `policy/tool-policy.yaml`
+- Mỗi hồ sơ phòng ban phải trỏ tới một gói năng lực có thật
+- Người soạn và người thẩm định phải khác nhà cung cấp
+
+Cấu hình đúng cú pháp nhưng mâu thuẫn giữa các tầng là cách quyền bị rò trong
+thực tế. Chạy script này trong CI (`.github/workflows/fleet-ci.yml` đã có sẵn).

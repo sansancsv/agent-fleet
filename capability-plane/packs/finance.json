@@ -1,0 +1,7 @@
+{
+  "//": "Gói năng lực cho phòng Tài chính. Dữ liệu nhạy cảm → chỉ model nội bộ.",
+  "servers": ["postgres-readonly", "google-drive", "notion"],
+  "clis": ["fleet-query", "fleet-drive"],
+  "writeAllowed": [],
+  "modelPolicy": { "requireSelfHosted": true, "allowedModels": ["openai-compatible/qwen3-coder-local"] }
+}

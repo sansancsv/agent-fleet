@@ -1,0 +1,185 @@
+{
+  "name": "Fleet · Cổng thẩm định pull request",
+  "meta": {
+    "description": "GitHub mở PR → thẩm định chéo bằng 3 model song song → hợp nhất → đăng nhận xét → cập nhật trạng thái commit. Toàn bộ phần điều phối là XÁC ĐỊNH; chỉ nội dung nhận xét là do model sinh."
+  },
+  "settings": { "executionOrder": "v1", "saveDataErrorExecution": "all", "timezone": "Asia/Ho_Chi_Minh" },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fleet/github-pr",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "w-hook",
+      "name": "GitHub PR (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-600, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.body.action }}",
+              "rightValue": "opened,synchronize,ready_for_review",
+              "operator": { "type": "string", "operation": "contains" }
+            },
+            {
+              "leftValue": "={{ $json.body.pull_request.draft }}",
+              "rightValue": false,
+              "operator": { "type": "boolean", "operation": "false", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "w-filter",
+      "name": "Lọc sự kiện đáng xử lý",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-380, 300],
+      "notes": "Không chạy trên draft và không chạy lại trên mọi sự kiện — mỗi lần chạy tốn tiền thật."
+    },
+    {
+      "parameters": {
+        "command": "=set -e\nREPO=\"{{ $json.body.repository.full_name }}\"\nPR={{ $json.body.pull_request.number }}\nWT=/srv/repos/pr-$PR\nrm -rf \"$WT\"\ngit clone --depth 50 \"https://x-access-token:$GITHUB_TOKEN@github.com/$REPO.git\" \"$WT\"\ncd \"$WT\"\ngit fetch origin \"pull/$PR/head:pr-$PR\"\ngit checkout \"pr-$PR\"\necho \"$WT\""
+      },
+      "id": "w-clone",
+      "name": "Lấy mã nguồn PR",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [-160, 300]
+    },
+    {
+      "parameters": {
+        "command": "=/fleet/execution-plane/scripts/run-role.sh reviewer \"{{ $json.stdout.trim() }}\" \"Xem diff so với origin/main. CHỈ ĐỌC. Mỗi phát hiện: [MỨC] file:dòng | mô tả | kịch bản hỏng. Mức: BLOCKER|MAJOR|MINOR|NIT.\""
+      },
+      "id": "w-rev-1",
+      "name": "Thẩm định · Codex",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [80, 140]
+    },
+    {
+      "parameters": {
+        "command": "=/fleet/execution-plane/scripts/run-role.sh security \"{{ $('Lấy mã nguồn PR').item.json.stdout.trim() }}\" \"Rà bảo mật diff. CHỈ ĐỌC. Tìm: secret bị commit, đầu vào không tin cậy chạm tới lệnh/truy vấn/đường dẫn, quyền bị nới rộng, phụ thuộc mới. Mỗi phát hiện: [MỨC] file:dòng | đường tấn công | cách chặn.\""
+      },
+      "id": "w-rev-2",
+      "name": "Thẩm định · Bảo mật",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [80, 300]
+    },
+    {
+      "parameters": {
+        "command": "=/fleet/execution-plane/scripts/run-role.sh analyst \"{{ $('Lấy mã nguồn PR').item.json.stdout.trim() }}\" \"Đánh giá độ bao phủ test của diff. Nêu nhánh nào chưa được test và rủi ro kèm theo. [MỨC] file:dòng | mô tả.\""
+      },
+      "id": "w-rev-3",
+      "name": "Thẩm định · Kiểm thử",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [80, 460]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "w-merge",
+      "name": "Gộp ba kết quả",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "numberInputs": 3,
+      "position": [340, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Hợp nhất phát hiện bằng LUẬT, không bằng model.\n// Quy tắc \"bằng chứng hoặc im lặng\": BLOCKER không có file:dòng thì bị loại.\nconst RE = /\\[?(BLOCKER|CRITICAL|MAJOR|MINOR|NIT)\\]?\\s*([\\w./-]+:\\d+)?\\s*[|:-]?\\s*(.+)/i;\nconst RANK = { CRITICAL: 5, BLOCKER: 4, MAJOR: 3, MINOR: 2, NIT: 1 };\n\nconst byKey = new Map();\nfor (const item of $input.all()) {\n  let payload;\n  try { payload = JSON.parse(item.json.stdout); } catch { continue; }\n  for (const line of String(payload.text || '').split('\\n')) {\n    const m = RE.exec(line);\n    if (!m) continue;\n    const sev = m[1].toUpperCase();\n    const loc = m[2] || '';\n    if ((sev === 'BLOCKER' || sev === 'CRITICAL') && !loc) continue;\n    const key = `${loc}|${(m[3] || '').slice(0, 60).toLowerCase()}`;\n    const prev = byKey.get(key);\n    if (prev) { prev.votes += 1; if (RANK[sev] > RANK[prev.severity]) prev.severity = sev; }\n    else byKey.set(key, { severity: sev, location: loc, detail: m[3].trim(), votes: 1, role: payload.role });\n  }\n}\n\nconst findings = [...byKey.values()].sort((a, b) => RANK[b.severity] - RANK[a.severity] || b.votes - a.votes);\nconst blockers = findings.filter(f => f.severity === 'BLOCKER' || f.severity === 'CRITICAL');\n\nconst body = [\n  '## Thẩm định tự động của Agent Fleet', '',\n  blockers.length ? `**${blockers.length} mục chặn merge.**` : '**Không có mục chặn merge.**', '',\n  '| Mức | Vị trí | Vấn đề | Đồng thuận |', '|---|---|---|---|',\n  ...findings.slice(0, 40).map(f => `| ${f.severity} | \\`${f.location || '—'}\\` | ${f.detail.replace(/\\|/g, '\\\\|').slice(0, 200)} | ${f.votes}/3 |`),\n  '', '_Ba model của ba nhà cung cấp khác nhau cùng soi diff này. Cột “đồng thuận” cho biết bao nhiêu model cùng nêu một vấn đề — mục 3/3 gần như chắc chắn là thật._',\n].join('\\n');\n\nreturn [{ json: { findings, blockerCount: blockers.length, body, state: blockers.length ? 'failure' : 'success' } }];"
+      },
+      "id": "w-consolidate",
+      "name": "Hợp nhất phát hiện (luật)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.github.com/repos/{{ $('GitHub PR (Webhook)').item.json.body.repository.full_name }}/issues/{{ $('GitHub PR (Webhook)').item.json.body.pull_request.number }}/comments",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Authorization", "value": "=Bearer {{ $env.GITHUB_TOKEN }}" },
+          { "name": "Accept", "value": "application/vnd.github+json" }
+        ]},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ body: $json.body }) }}",
+        "options": {}
+      },
+      "id": "w-comment",
+      "name": "Đăng nhận xét lên PR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [800, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.github.com/repos/{{ $('GitHub PR (Webhook)').item.json.body.repository.full_name }}/statuses/{{ $('GitHub PR (Webhook)').item.json.body.pull_request.head.sha }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Authorization", "value": "=Bearer {{ $env.GITHUB_TOKEN }}" },
+          { "name": "Accept", "value": "application/vnd.github+json" }
+        ]},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ state: $('Hợp nhất phát hiện (luật)').item.json.state, context: 'fleet/cross-review', description: `${$('Hợp nhất phát hiện (luật)').item.json.blockerCount} mục chặn` }) }}",
+        "options": {}
+      },
+      "id": "w-status",
+      "name": "Cập nhật trạng thái commit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [800, 380],
+      "notes": "Trạng thái commit là thứ chặn nút Merge trên GitHub. Nhận xét chỉ để đọc; trạng thái mới có hiệu lực."
+    },
+    {
+      "parameters": {
+        "command": "=rm -rf \"{{ $('Lấy mã nguồn PR').item.json.stdout.trim() }}\""
+      },
+      "id": "w-cleanup",
+      "name": "Dọn thư mục tạm",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1040, 300]
+    }
+  ],
+  "connections": {
+    "GitHub PR (Webhook)": { "main": [[{ "node": "Lọc sự kiện đáng xử lý", "type": "main", "index": 0 }]] },
+    "Lọc sự kiện đáng xử lý": { "main": [[{ "node": "Lấy mã nguồn PR", "type": "main", "index": 0 }], []] },
+    "Lấy mã nguồn PR": {
+      "main": [[
+        { "node": "Thẩm định · Codex", "type": "main", "index": 0 },
+        { "node": "Thẩm định · Bảo mật", "type": "main", "index": 0 },
+        { "node": "Thẩm định · Kiểm thử", "type": "main", "index": 0 }
+      ]]
+    },
+    "Thẩm định · Codex": { "main": [[{ "node": "Gộp ba kết quả", "type": "main", "index": 0 }]] },
+    "Thẩm định · Bảo mật": { "main": [[{ "node": "Gộp ba kết quả", "type": "main", "index": 1 }]] },
+    "Thẩm định · Kiểm thử": { "main": [[{ "node": "Gộp ba kết quả", "type": "main", "index": 2 }]] },
+    "Gộp ba kết quả": { "main": [[{ "node": "Hợp nhất phát hiện (luật)", "type": "main", "index": 0 }]] },
+    "Hợp nhất phát hiện (luật)": {
+      "main": [[
+        { "node": "Đăng nhận xét lên PR", "type": "main", "index": 0 },
+        { "node": "Cập nhật trạng thái commit", "type": "main", "index": 0 }
+      ]]
+    },
+    "Đăng nhận xét lên PR": { "main": [[{ "node": "Dọn thư mục tạm", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {}
+}

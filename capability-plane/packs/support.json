@@ -1,0 +1,6 @@
+{
+  "//": "Gói năng lực cho phòng Chăm sóc khách hàng.",
+  "servers": ["notion", "linear", "postgres-readonly"],
+  "clis": ["fleet-wiki", "fleet-issues", "fleet-query"],
+  "writeAllowed": ["linear"]
+}

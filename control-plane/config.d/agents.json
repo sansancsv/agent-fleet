@@ -1,0 +1,147 @@
+// =============================================================================
+// ĐỘI HÌNH AGENT (agent roster) — 9 vai trò chuẩn cho một code team enterprise
+// -----------------------------------------------------------------------------
+// Nguyên tắc thiết kế:
+//   1. MỘT VAI TRÒ = MỘT AGENT ID = MỘT WORKSPACE = MỘT TOOL POLICY.
+//      Không dùng "một agent vạn năng": không phân quyền được, không audit được.
+//   2. QUYỀN GHI LÀ ĐẶC QUYỀN. Chỉ implementer/sre được `write`+`exec`.
+//      reviewer/security/analyst là read-only — đây là lớp kiểm soát chéo.
+//   3. MODEL ĐA NHÀ CUNG CẤP (multi-provider): mỗi vai trò có primary + fallbacks
+//      để không phụ thuộc một nhà cung cấp và tự động chuyển khi rate-limit.
+//   4. Vai trò "reviewer" cố tình dùng model KHÁC implementer để tránh
+//      "mù lỗi đồng nhất" (correlated blind spot).
+// =============================================================================
+{
+  agents: {
+    // --- Giá trị mặc định, mọi agent kế thừa nếu không ghi đè ---------------
+    defaults: {
+      workspace: "/home/node/.openclaw/workspaces/_shared",
+      model: {
+        primary: "anthropic/claude-sonnet-4-6",
+        fallbacks: ["openai/gpt-5.4", "google/gemini-3-pro"],
+      },
+      // Sandbox mặc định: mọi tool chạy trong container riêng, phạm vi agent.
+      sandbox: { mode: "all", scope: "agent" },
+      // Mặc định KHÔNG cho ghi/chạy lệnh. Vai trò nào cần thì tự mở.
+      tools: { allow: ["read", "search", "fetch"], deny: ["write", "exec"] },
+      skills: ["fleet-code-review", "fleet-adr", "fleet-release-gate"],
+      bootstrapMaxChars: 24000,
+      bootstrapTotalMaxChars: 64000,
+      maxSkillsPromptChars: 12000,
+      heartbeat: { every: "60m", target: "owner" },
+    },
+
+    entries: {
+      // ---------------------------------------------------------------------
+      // 1) ORCHESTRATOR — "trưởng nhóm". Nhận yêu cầu, phân rã, giao việc.
+      //    Không tự viết code. Chỉ gọi agent khác (agent-to-agent) và mở flow.
+      // ---------------------------------------------------------------------
+      orchestrator: {
+        default: true,
+        workspace: "/home/node/.openclaw/workspaces/orchestrator",
+        model: { primary: "anthropic/claude-opus-4-6", fallbacks: ["openai/gpt-5.4"] },
+        skills: ["fleet-dept-intake", "fleet-release-gate"],
+        tools: { allow: ["read", "search", "fetch", "agent_send", "exec"], deny: ["write"] },
+        identity: { emoji: "🧭", displayName: "Orchestrator" },
+      },
+
+      // ---------------------------------------------------------------------
+      // 2) ARCHITECT — thiết kế, ADR (Architecture Decision Record).
+      //    Được ghi, nhưng chỉ trong thư mục tài liệu (giới hạn bằng workspace).
+      // ---------------------------------------------------------------------
+      architect: {
+        workspace: "/home/node/.openclaw/workspaces/architect",
+        model: { primary: "anthropic/claude-opus-4-6", fallbacks: ["google/gemini-3-pro"] },
+        skills: ["fleet-adr"],
+        tools: { allow: ["read", "search", "fetch", "write"], deny: ["exec"] },
+        identity: { emoji: "📐", displayName: "Architect" },
+      },
+
+      // ---------------------------------------------------------------------
+      // 3) IMPLEMENTER — vai trò DUY NHẤT được ghi code + chạy lệnh trong repo.
+      //    Luôn làm trên git worktree riêng (xem execution-plane/flows).
+      // ---------------------------------------------------------------------
+      implementer: {
+        workspace: "/home/node/.openclaw/workspaces/implementer",
+        model: { primary: "anthropic/claude-sonnet-4-6", fallbacks: ["openai/gpt-5.4-codex"] },
+        skills: [],
+        tools: { allow: ["read", "search", "fetch", "write", "exec"], deny: [] },
+        sandbox: { mode: "all", scope: "agent", network: "restricted" },
+        identity: { emoji: "🔨", displayName: "Implementer" },
+      },
+
+      // ---------------------------------------------------------------------
+      // 4) REVIEWER — read-only. Model khác implementer để soi lỗi độc lập.
+      // ---------------------------------------------------------------------
+      reviewer: {
+        workspace: "/home/node/.openclaw/workspaces/reviewer",
+        model: { primary: "openai/gpt-5.4", fallbacks: ["google/gemini-3-pro"] },
+        skills: ["fleet-code-review"],
+        tools: { allow: ["read", "search"], deny: ["write", "exec", "fetch"] },
+        identity: { emoji: "🔍", displayName: "Reviewer" },
+      },
+
+      // ---------------------------------------------------------------------
+      // 5) TESTER — viết và chạy test. Ghi được nhưng chỉ trong thư mục test.
+      // ---------------------------------------------------------------------
+      tester: {
+        workspace: "/home/node/.openclaw/workspaces/tester",
+        model: { primary: "anthropic/claude-sonnet-4-6", fallbacks: ["openai/gpt-5.4"] },
+        tools: { allow: ["read", "search", "write", "exec"], deny: ["fetch"] },
+        sandbox: { mode: "all", scope: "agent", network: "none" },
+        identity: { emoji: "🧪", displayName: "Tester" },
+      },
+
+      // ---------------------------------------------------------------------
+      // 6) SECURITY — read-only tuyệt đối. Quét secret, SAST, mô hình mối đe doạ.
+      // ---------------------------------------------------------------------
+      security: {
+        workspace: "/home/node/.openclaw/workspaces/security",
+        model: { primary: "anthropic/claude-opus-4-6", fallbacks: ["openai/gpt-5.4"] },
+        tools: { allow: ["read", "search", "exec"], deny: ["write", "fetch"] },
+        sandbox: { mode: "all", scope: "agent", network: "none" },
+        identity: { emoji: "🛡️", displayName: "Security" },
+      },
+
+      // ---------------------------------------------------------------------
+      // 7) DOCS — tài liệu kỹ thuật, changelog, release note.
+      // ---------------------------------------------------------------------
+      "docs-writer": {
+        workspace: "/home/node/.openclaw/workspaces/docs-writer",
+        model: { primary: "google/gemini-3-pro", fallbacks: ["anthropic/claude-sonnet-4-6"] },
+        tools: { allow: ["read", "search", "fetch", "write"], deny: ["exec"] },
+        identity: { emoji: "📚", displayName: "Docs" },
+      },
+
+      // ---------------------------------------------------------------------
+      // 8) SRE — triển khai, sự cố, runbook. Có exec nhưng KHÔNG có write vào repo.
+      // ---------------------------------------------------------------------
+      sre: {
+        workspace: "/home/node/.openclaw/workspaces/sre",
+        model: { primary: "anthropic/claude-sonnet-4-6", fallbacks: ["openai/gpt-5.4"] },
+        tools: { allow: ["read", "search", "fetch", "exec"], deny: ["write"] },
+        identity: { emoji: "🚨", displayName: "SRE" },
+      },
+
+      // ---------------------------------------------------------------------
+      // 9) ANALYST — số liệu, báo cáo. Dùng chung cho mọi phòng ban.
+      // ---------------------------------------------------------------------
+      analyst: {
+        workspace: "/home/node/.openclaw/workspaces/analyst",
+        model: { primary: "google/gemini-3-pro", fallbacks: ["anthropic/claude-sonnet-4-6"] },
+        tools: { allow: ["read", "search", "fetch"], deny: ["write", "exec"] },
+        identity: { emoji: "📊", displayName: "Analyst" },
+      },
+    },
+  },
+
+  // --- Cho phép agent gọi agent (bắt buộc để orchestrator điều phối) ---------
+  tools: {
+    agentToAgent: {
+      enabled: true,
+      // Chỉ orchestrator được phép khởi tạo hội thoại chéo.
+      allowFrom: ["orchestrator"],
+      allowTo: ["architect", "implementer", "reviewer", "tester", "security", "docs-writer", "sre", "analyst"],
+    },
+  },
+}

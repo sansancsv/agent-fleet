@@ -1,0 +1,37 @@
+// =============================================================================
+// BINDINGS — luật định tuyến tin nhắn (message routing) vào đúng agent
+// -----------------------------------------------------------------------------
+// OpenClaw chọn agent theo thứ tự cụ thể → chung:
+//   exact peer > parent peer > peer wildcard > guild+roles > guild > team
+//   > account > channel > default agent
+// Trong cùng một tầng, luật NÀO ĐỨNG TRƯỚC TRONG FILE THÌ THẮNG.
+// => Luôn xếp từ hẹp nhất xuống rộng nhất.
+//
+// Kiểm tra:  openclaw agents list --bindings   /   openclaw agents list --tree
+// =============================================================================
+{
+  bindings: [
+    // ---- Tầng hẹp nhất: kênh chuyên trách của từng vai trò ------------------
+    // Mỗi vai trò có một kênh Slack riêng => hỏi ở đâu thì đúng người trả lời.
+    { agentId: "architect",   match: { channel: "slack", peer: { kind: "channel", id: "C_FLEET_ARCH" } } },
+    { agentId: "reviewer",    match: { channel: "slack", peer: { kind: "channel", id: "C_FLEET_REVIEW" } } },
+    { agentId: "security",    match: { channel: "slack", peer: { kind: "channel", id: "C_FLEET_SEC" } } },
+    { agentId: "sre",         match: { channel: "slack", peer: { kind: "channel", id: "C_FLEET_INCIDENT" } } },
+    { agentId: "docs-writer", match: { channel: "slack", peer: { kind: "channel", id: "C_FLEET_DOCS" } } },
+
+    // ---- Tầng phòng ban: mỗi phòng ban một Slack account/bot riêng ----------
+    // Bot "acc-marketing" luôn rơi vào agent analyst (đọc số liệu, không ghi).
+    { agentId: "analyst", match: { channel: "slack", accountId: "acc-marketing" } },
+    { agentId: "analyst", match: { channel: "slack", accountId: "acc-finance" } },
+
+    // ---- Tầng account kỹ thuật ---------------------------------------------
+    { agentId: "orchestrator", match: { channel: "slack", accountId: "acc-engineering" } },
+
+    // ---- Kênh khác ----------------------------------------------------------
+    { agentId: "sre",          match: { channel: "telegram", accountId: "alerts" } },
+    { agentId: "orchestrator", match: { channel: "telegram", accountId: "default" } },
+
+    // ---- Bắt tất cả phần còn lại -------------------------------------------
+    { agentId: "orchestrator", match: { channel: "*", accountId: "*" } },
+  ],
+}

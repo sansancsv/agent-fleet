@@ -1,0 +1,60 @@
+// =============================================================================
+// OpenClaw Gateway — cấu hình gốc (root config) của Agent Fleet
+// -----------------------------------------------------------------------------
+// File này được mount vào container tại /home/node/.openclaw/openclaw.json
+// Định dạng: JSON5 (cho phép comment + trailing comma).
+// Cấu hình được tách nhỏ bằng `$include` để mỗi phòng ban / mỗi nhóm quan tâm
+// chỉ phải sửa đúng một file, tránh xung đột merge.
+//
+// Kiểm tra sau khi sửa:
+//   openclaw config validate
+//   openclaw security audit
+// =============================================================================
+{
+  $schema: "https://docs.openclaw.ai/schemas/openclaw.json",
+
+  // --- Gateway: cổng vào duy nhất của toàn bộ fleet -------------------------
+  gateway: {
+    // Trong Docker/K8s phải bind 0.0.0.0 để kube-proxy/ingress vào được,
+    // NHƯNG bắt buộc đi kèm auth token + NetworkPolicy (xem deploy/k8s).
+    bind: "${OPENCLAW_BIND:-loopback}",
+    port: 18789,
+    auth: {
+      mode: "token",
+      token: { source: "env", id: "OPENCLAW_GATEWAY_TOKEN" },
+    },
+    // Danh sách proxy tin cậy để đọc đúng X-Forwarded-For (ingress-nginx).
+    trustedProxies: ["10.0.0.0/8", "172.16.0.0/12"],
+  },
+
+  // --- Các khối cấu hình tách file ------------------------------------------
+  $include: [
+    "./config.d/models.json",
+    "./config.d/agents.json",
+    "./config.d/bindings.json",
+    "./config.d/channels.json",
+    "./config.d/security.json",
+    "./config.d/mcp.json",
+    "./config.d/cron.json",
+  ],
+
+  // --- Biến môi trường dùng chung -------------------------------------------
+  env: {
+    vars: {
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}",
+      OPENAI_API_KEY: "${OPENAI_API_KEY}",
+      GEMINI_API_KEY: "${GEMINI_API_KEY}",
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}",
+      FLEET_ENV: "${FLEET_ENV:-staging}",
+    },
+    // Không kế thừa toàn bộ shell env của host — giảm rò rỉ secret.
+    shellEnv: { enabled: false },
+  },
+
+  // --- Phiên làm việc --------------------------------------------------------
+  session: {
+    // Mỗi người nhắn tin có phiên riêng — bắt buộc khi nhiều phòng ban dùng chung.
+    dmScope: "per-channel-peer",
+    reset: { mode: "idle", idleMinutes: 240 },
+  },
+}

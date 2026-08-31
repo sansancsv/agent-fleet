@@ -1,0 +1,121 @@
+{
+  "$schema": "https://raw.githubusercontent.com/openclaw/mcporter/main/mcporter.schema.json",
+
+  "//": "===================================================================",
+  "//1": "mcporter — MỘT NGUỒN SỰ THẬT cho toàn bộ MCP server của công ty.",
+  "//2": "Mount vào ~/.mcporter/mcporter.json (hoặc $XDG_CONFIG_HOME/mcporter/).",
+  "//3": "",
+  "//4": "Vì sao tập trung ở đây thay vì khai báo trong từng agent:",
+  "//5": "  - Sửa một chỗ → OpenClaw, acpx, LangGraph, n8n đều thấy ngay.",
+  "//6": "  - Lọc tool (allowedTools/blockedTools) làm một nơi → audit được.",
+  "//7": "  - Token/OAuth nằm trong vault của mcporter, không rải rác nhiều file.",
+  "//8": "",
+  "//9": "Kiểm tra:  mcporter list            (liệt kê server + chữ ký tool)",
+  "//10": "          mcporter list <server>   (xem chi tiết một server)",
+  "//11": "          mcporter call <server> <tool> --json '{...}'",
+  "//12": "===================================================================",
+
+  "//imports": "TẮT hoàn toàn việc tự nhập cấu hình từ Cursor/Claude/VS Code của máy cá nhân.",
+  "//imports2": "Trong môi trường doanh nghiệp, cấu hình phải tường minh và nằm trong git.",
+  "imports": [],
+
+  "//daemon": "Daemon giữ kết nối sống → không phải khởi động lại server stdio mỗi lần gọi.",
+  "daemonIdleTimeoutMs": 900000,
+
+  "mcpServers": {
+
+    "//--- NHÓM MÃ NGUỒN ------------------------------------------------": "",
+
+    "github": {
+      "description": "Kho mã, pull request, issue, workflow CI",
+      "baseUrl": "https://api.githubcopilot.com/mcp/",
+      "headers": { "Authorization": "Bearer ${GITHUB_MCP_TOKEN}" },
+      "//policy": "Chỉ mở đúng tool cần dùng. Không mở tool xoá/quản trị.",
+      "allowedTools": [
+        "search_code", "get_file_contents", "list_commits",
+        "get_pull_request", "get_pull_request_diff", "list_pull_requests",
+        "create_pull_request", "add_pull_request_review_comment",
+        "list_issues", "get_issue", "create_issue", "add_issue_comment"
+      ],
+      "lifecycle": { "idleTimeoutMs": 600000 }
+    },
+
+    "linear": {
+      "description": "Quản lý công việc: issue, chu kỳ, dự án",
+      "baseUrl": "https://mcp.linear.app/mcp",
+      "auth": "oauth",
+      "oauthScope": "read write",
+      "allowedTools": ["list_issues", "get_issue", "save_issue", "list_projects", "save_comment"]
+    },
+
+    "//--- NHÓM TRI THỨC ------------------------------------------------": "",
+
+    "context7": {
+      "description": "Tài liệu thư viện luôn mới — chống việc model bịa API",
+      "baseUrl": "https://mcp.context7.com/mcp",
+      "allowedTools": ["resolve-library-id", "get-library-docs"]
+    },
+
+    "notion": {
+      "description": "Wiki nội bộ, tài liệu phòng ban",
+      "baseUrl": "https://mcp.notion.com/mcp",
+      "auth": "oauth",
+      "//policy": "CHẶN xoá — agent không bao giờ được xoá tài liệu công ty.",
+      "blockedTools": ["notion-trash-page", "notion-delete-*"]
+    },
+
+    "//--- NHÓM VẬN HÀNH ------------------------------------------------": "",
+
+    "grafana": {
+      "description": "Chỉ số, log, cảnh báo",
+      "baseUrl": "${GRAFANA_MCP_URL}",
+      "headers": { "Authorization": "Bearer ${GRAFANA_SA_TOKEN}" },
+      "allowedTools": ["query_prometheus", "query_loki_logs", "list_alert_rules", "get_dashboard"]
+    },
+
+    "postgres-readonly": {
+      "description": "Kho dữ liệu — TÀI KHOẢN CHỈ ĐỌC ở tầng CSDL, không chỉ ở tầng cấu hình",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "${DW_READONLY_DSN}"],
+      "env": { "PGCONNECT_TIMEOUT": "10" },
+      "allowedTools": ["query"],
+      "lifecycle": { "idleTimeoutMs": 300000 }
+    },
+
+    "//--- NHÓM NỘI BỘ (tự viết) ----------------------------------------": "",
+
+    "fleet-internal": {
+      "description": "MCP server nội bộ: tra cứu dịch vụ, sổ đăng ký chủ sở hữu, cổng triển khai",
+      "command": "node",
+      "args": ["/fleet/mcp-servers/internal/dist/index.js"],
+      "cwd": "/fleet/mcp-servers/internal",
+      "env": {
+        "SERVICE_CATALOG_URL": "${SERVICE_CATALOG_URL}",
+        "FLEET_ENV": "${FLEET_ENV:-staging}"
+      }
+    },
+
+    "//--- CHỈ DÀNH CHO PHÒNG BAN NGOÀI KỸ THUẬT ------------------------": "",
+
+    "google-drive": {
+      "description": "Tài liệu, bảng tính của các phòng ban",
+      "baseUrl": "https://mcp.google.com/drive/mcp",
+      "auth": "oauth",
+      "blockedTools": ["trash_file", "delete_*"]
+    },
+
+    "hubspot": {
+      "description": "CRM cho marketing và kinh doanh",
+      "baseUrl": "${HUBSPOT_MCP_URL}",
+      "auth": "refreshable_bearer",
+      "refresh": {
+        "tokenEndpoint": "https://api.hubapi.com/oauth/v1/token",
+        "clientIdEnv": "HUBSPOT_CLIENT_ID",
+        "clientSecretEnv": "HUBSPOT_CLIENT_SECRET",
+        "clientAuthMethod": "client_secret_post",
+        "refreshSkewSeconds": 300
+      },
+      "allowedTools": ["search_contacts", "get_contact", "list_deals", "get_deal"]
+    }
+  }
+}

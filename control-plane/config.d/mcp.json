@@ -1,0 +1,35 @@
+// =============================================================================
+// MCP — kết nối năng lực bên ngoài vào fleet
+// -----------------------------------------------------------------------------
+// QUAN TRỌNG — nguyên tắc "một nguồn sự thật" (single source of truth):
+//   KHÔNG khai báo lại từng MCP server ở đây. Toàn bộ MCP server được quản lý
+//   tập trung trong capability-plane/mcporter.json và mcporter chạy ở chế độ
+//   daemon, phơi ra MỘT cầu nối MCP duy nhất. OpenClaw chỉ cắm vào cầu nối đó.
+//
+// Vì sao?
+//   - Sửa một chỗ, mọi agent (OpenClaw, acpx, LangGraph, n8n) đều thấy.
+//   - Lọc tool (allowedTools/blockedTools) làm ở một nơi → audit dễ.
+//   - OAuth/token nằm trong vault của mcporter, không rải rác trong nhiều file.
+// =============================================================================
+{
+  mcp: {
+    servers: {
+      // Cầu nối duy nhất tới toàn bộ MCP server đã cấu hình trong mcporter.
+      "mcporter-bridge": {
+        type: "http",
+        url: "${MCPORTER_BRIDGE_URL:-http://mcporter.fleet.svc.cluster.local:7420/mcp}",
+        headers: { Authorization: "Bearer ${MCPORTER_BRIDGE_TOKEN}" },
+        // Lọc lần 2 ở tầng gateway (phòng thủ nhiều lớp - defense in depth).
+        blockedTools: [
+          "*_delete_*",
+          "*_drop_*",
+          "admin_*",
+        ],
+      },
+    },
+
+    // Giới hạn số tool nạp vào ngữ cảnh mỗi lượt. Vượt ngưỡng thì dùng
+    // "skill pattern": agent gọi CLI do mcporter sinh ra thay vì nạp hết tool.
+    maxToolsInContext: 40,
+  },
+}

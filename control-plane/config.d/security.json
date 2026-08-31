@@ -1,0 +1,76 @@
+// =============================================================================
+// SECURITY — chính sách truy cập, sandbox, ghi nhật ký kiểm toán (audit log)
+// -----------------------------------------------------------------------------
+// Mô hình mối đe doạ thực tế của một agent fleet KHÔNG phải "model bị hack",
+// mà là: "có người nhắn cho bot và bot làm đúng như họ bảo".
+// Vì vậy thứ tự phòng thủ là:
+//     (1) DANH TÍNH  — ai được nhắn?      → dmPolicy / allowFrom
+//     (2) PHẠM VI    — bot được làm gì?   → tools.allow/deny + sandbox
+//     (3) MODEL      — luôn giả định model có thể bị dẫn dụ (prompt injection)
+//
+// Chạy `openclaw security audit` sau MỌI thay đổi cấu hình.
+// =============================================================================
+{
+  channels: {
+    // Mọi kênh: người lạ nhắn tin sẽ bị chặn, không phát mã ghép đôi.
+    defaults: {
+      dmPolicy: "allowlist",
+      groupPolicy: "allowlist",
+      requireMention: true,
+    },
+  },
+
+  agents: {
+    defaults: {
+      sandbox: {
+        // "all" = mọi tool chạy trong container tách biệt.
+        mode: "all",
+        // "agent" = agent này không thấy được filesystem của agent khác.
+        scope: "agent",
+        // Chặn mạng mặc định; vai trò nào cần thì mở riêng (xem agents.json).
+        network: "none",
+        // Giới hạn tài nguyên cho mỗi lần chạy tool.
+        limits: { cpus: 2, memoryMb: 4096, timeoutMs: 900000 },
+      },
+      workspaceAccess: "workspace-only",
+    },
+  },
+
+  // --- Nhật ký kiểm toán ------------------------------------------------------
+  logging: {
+    level: "info",
+    // Ghi mọi lần gọi tool + mọi lần chuyển model dự phòng (fallback).
+    audit: {
+      enabled: true,
+      // JSON Lines để đẩy thẳng vào Loki / OpenSearch / Splunk.
+      format: "jsonl",
+      path: "/home/node/.openclaw/audit/fleet-audit.jsonl",
+      include: [
+        "tool.call",
+        "tool.result",
+        "model.select",
+        "model.fallback",
+        "agent.handoff",
+        "permission.decision",
+        "session.create",
+        "config.change",
+      ],
+      // Che dữ liệu nhạy cảm trước khi ghi.
+      redact: ["**.apiKey", "**.token", "**.password", "**.authorization"],
+    },
+  },
+
+  // --- Giới hạn tần suất (rate limit) chống lạm dụng và chống cháy hoá đơn ---
+  limits: {
+    perSender: { messagesPerHour: 120 },
+    perAgent: { concurrentSessions: 8, tokensPerDay: 8000000 },
+    global: { concurrentToolCalls: 24 },
+  },
+
+  // --- Đánh dấu nội dung không tin cậy ---------------------------------------
+  // Mọi nội dung lấy từ web / issue tracker / email đều được bọc trong thẻ
+  // <untrusted> trước khi vào prompt → giảm mạnh prompt injection.
+  content: {
+    untrustedMarkers: { enabled: true, sources: ["fetch", "mcp", "channel-attachment"] },
+  },
+}

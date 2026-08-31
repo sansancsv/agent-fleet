@@ -1,0 +1,58 @@
+# =============================================================================
+# agent-runner — ảnh chứa acpx + mcporter + toàn bộ backend agent
+# -----------------------------------------------------------------------------
+# Đây là nơi công việc thật diễn ra. Ba nguyên tắc:
+#   1. KHÔNG chạy bằng root. Agent có quyền exec — chạy root là tự mở cửa.
+#   2. Ghim phiên bản. "latest" trong ảnh production là nguồn của sự cố khó tái hiện.
+#   3. Cài đủ công cụ mà agent cần (git, gh, ripgrep, jq, yq), không hơn.
+# =============================================================================
+FROM node:24-bookworm-slim AS base
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    NODE_ENV=production \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl git openssh-client jq ripgrep less \
+      python3 python3-venv build-essential \
+ && curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq \
+ && chmod +x /usr/local/bin/yq \
+ && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+ && apt-get update && apt-get install -y --no-install-recommends gh \
+ && rm -rf /var/lib/apt/lists/*
+
+# --- Công cụ fleet. GHIM PHIÊN BẢN ở môi trường thật. ------------------------
+ARG ACPX_VERSION=latest
+ARG MCPORTER_VERSION=latest
+RUN npm install -g \
+      "acpx@${ACPX_VERSION}" \
+      "mcporter@${MCPORTER_VERSION}" \
+ && npm cache clean --force
+
+# --- Các backend agent (ACP adapter) ----------------------------------------
+# Cài đúng những backend mà fleet dùng. Thêm/bớt ở đây, không sửa code.
+RUN npm install -g \
+      @anthropic-ai/claude-code \
+      @zed-industries/claude-code-acp \
+ && npm cache clean --force
+
+# Codex và Gemini CLI cài riêng vì nhịp phát hành khác nhau.
+RUN npm install -g @openai/codex @google/gemini-cli || \
+    echo "CẢNH BÁO: một số backend chưa cài được — kiểm tra lại tên gói"
+
+COPY --chown=node:node execution-plane /fleet/execution-plane
+COPY --chown=node:node capability-plane /fleet/capability-plane
+COPY --chown=node:node profiles /fleet/profiles
+
+RUN mkdir -p /srv/repos /var/log/fleet /home/node/.acpx /home/node/.mcporter \
+ && chown -R node:node /srv/repos /var/log/fleet /home/node
+
+USER node
+WORKDIR /srv/repos
+
+# Không có ENTRYPOINT cố định: dịch vụ này vừa dùng cho mcporter daemon,
+# vừa dùng cho worker thực thi. Lệnh cụ thể do compose/K8s truyền vào.
+CMD ["sleep", "infinity"]

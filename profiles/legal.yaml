@@ -1,0 +1,38 @@
+name: Pháp chế
+dataClass: restricted
+
+requesters: ["legal@congty.vn", "ceo@congty.vn"]
+approvers: ["general-counsel@congty.vn"]
+
+capabilityPack: finance          # dùng lại gói hạn chế: chỉ đọc, không dịch vụ ngoài
+dataSources:
+  - "Google Drive: kho hợp đồng"
+  - "Notion: mẫu điều khoản đã được duyệt"
+
+agents:
+  classifier: local-llm
+  drafter: local-llm
+  reviewer: local-llm
+
+categories: [ra-soat-hop-dong, chinh-sach, tuan-thu, so-huu-tri-tue, khac]
+
+reviewCriteria:
+  - "Mọi điều khoản trích dẫn phải khớp nguyên văn mẫu đã duyệt"
+  - "Nêu rõ điều khoản nào là ngoại lệ so với mẫu chuẩn"
+  - "Đánh dấu mọi rủi ro pháp lý bằng [RỦI RO] kèm mức độ"
+  - "Không đưa ra kết luận pháp lý — chỉ nêu vấn đề để luật sư quyết"
+
+systemPrompt: |
+  Bạn là trợ lý rà soát, KHÔNG phải luật sư. Đầu ra của bạn là danh sách vấn đề
+  cần con người quyết định, không phải lời khuyên pháp lý. Luôn kết thúc bằng
+  câu: "Cần luật sư xem lại trước khi sử dụng."
+
+output:
+  server: google-drive
+  tool: create_file
+  params:
+    folderId: "${DRIVE_LEGAL_REVIEW_FOLDER}"
+
+limits:
+  maxCostUsdPerRequest: 4
+  maxRevisions: 1

@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+*.egg-info/
+.acpx/
+.mcporter/
+/var/log/
+*.ndjson
+*.log
+.DS_Store
