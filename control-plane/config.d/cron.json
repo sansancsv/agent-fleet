@@ -1,39 +1,20 @@
 // =============================================================================
-// CRON — các việc định kỳ do fleet tự chạy (đây là "workflow xác định" đơn giản)
+// CRON — bật cơ chế tự động hoá theo lịch của gateway
 // -----------------------------------------------------------------------------
-// Quy tắc: cron chỉ dùng cho việc ĐỊNH KỲ + ĐƠN GIẢN (1 bước).
-// Việc nhiều bước có nhánh → dùng n8n (nghiệp vụ) hoặc LangGraph (bền vững).
+// QUAN TRỌNG: openclaw.json KHÔNG phải nơi khai báo các job định kỳ.
+// Schema của khối `cron` chỉ có: enabled, triggers, failureAlert,
+// sessionRetention, webhookToken, webhookSsrfPolicy. Lịch chạy là dữ liệu do
+// gateway quản lý, tạo qua CLI/API — không phải cấu hình tĩnh.
+//
+// Vì vậy các việc định kỳ của fleet (standup, quét bảo mật đêm, rà nợ kỹ thuật,
+// kiểm tra sức khoẻ) được đặt trong n8n:
+//     orchestration/n8n/workflows/03-lich-dinh-ky.json
+// Đó cũng là chỗ đúng hơn về mặt kiến trúc: n8n là tầng quy trình xác định,
+// người vận hành sửa lịch được mà không cần deploy lại gateway.
 // =============================================================================
 {
   cron: {
     enabled: true,
-    // Múi giờ chuẩn của fleet — mọi lịch bên dưới tính theo giờ này.
-    timezone: "Asia/Ho_Chi_Minh",
-    jobs: {
-      // 08:30 mỗi ngày làm việc: tổng hợp trạng thái cho standup.
-      "daily-standup": {
-        schedule: "30 8 * * 1-5",
-        agentId: "analyst",
-        prompt: "Tổng hợp hoạt động 24h qua: PR đã mở/đã merge, issue chuyển trạng thái, cảnh báo production. Trả về đúng 3 mục: Hôm qua / Hôm nay / Vướng mắc. Gửi vào kênh #fleet-standup.",
-      },
-      // 02:00 mỗi ngày: quét bảo mật phụ thuộc.
-      "nightly-security-scan": {
-        schedule: "0 2 * * *",
-        agentId: "security",
-        prompt: "Chạy quét phụ thuộc và quét secret trên nhánh main. Nếu có phát hiện mức HIGH/CRITICAL, tạo issue và báo vào #fleet-security.",
-      },
-      // Thứ Hai 09:00: rà nợ kỹ thuật.
-      "weekly-tech-debt": {
-        schedule: "0 9 * * 1",
-        agentId: "architect",
-        prompt: "Rà soát nợ kỹ thuật tuần qua: file thay đổi nhiều nhất, độ phức tạp tăng, test bị bỏ qua. Đề xuất tối đa 3 hạng mục ưu tiên kèm ước lượng.",
-      },
-      // Mỗi 6 giờ: kiểm tra sức khoẻ fleet.
-      "fleet-health": {
-        schedule: "0 */6 * * *",
-        agentId: "sre",
-        prompt: "Kiểm tra /healthz, /readyz của gateway, độ trễ MCP bridge, và hạn mức token còn lại của từng agent. Chỉ báo cáo khi có bất thường.",
-      },
-    },
+    triggers: { enabled: true },
   },
 }

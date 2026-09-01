@@ -32,6 +32,17 @@ Script này dò `--help` của bản **thật** trên máy bạn và báo ngay c
 vì để bạn phát hiện lúc container đã chạy. Nó cũng cảnh báo nếu repo đang nằm
 trên ổ Windows trong WSL.
 
+### 2c. Kiểm chứng cấu hình OpenClaw bằng chính binary
+
+```bash
+make oc-validate
+```
+
+Schema của OpenClaw nghiêm ngặt — một khoá thừa là gateway từ chối khởi động, và
+thông báo lỗi chỉ xuất hiện lúc container chạy. Lệnh này chạy `openclaw config
+validate` trên một bản sao tạm, nên không đụng tới `~/.openclaw` thật của bạn.
+`make up` gọi nó trước khi khởi động, nên loại lỗi này không lọt tới runtime nữa.
+
 ### 3. Điền khoá nhà cung cấp model
 ```bash
 $EDITOR .env

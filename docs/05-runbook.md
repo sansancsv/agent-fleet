@@ -96,6 +96,36 @@ mcporter call notion.notion-create-pages parentPageId=abc content=@/tmp/body.md
 ```
 `key=@path` đọc giá trị từ tệp — dùng cho nội dung dài để khỏi thoát chuỗi trong shell.
 
+### Gateway báo `Unrecognized keys` / `Invalid config`
+
+Schema của OpenClaw **nghiêm ngặt**: một khoá lạ là gateway từ chối khởi động.
+Đừng đoán tên khoá — hỏi chính binary:
+
+```bash
+make oc-validate                       # kiểm chứng bằng binary OpenClaw
+openclaw config schema | jq '.properties.agents.properties.defaults.properties | keys'
+```
+
+**Đừng chạy `openclaw doctor --fix` trên cấu hình nằm trong git.** Nó sửa tại chỗ
+và âm thầm bỏ những khoá bạn cố ý đặt; lần deploy sau bạn sẽ không biết vì sao
+hành vi đổi. Sửa tay theo thông báo lỗi.
+
+Những khác biệt đã trả giá để biết (OpenClaw 2026.8.1):
+
+| Tôi tưởng | Thực tế |
+|---|---|
+| `agents.defaults.tools` | không tồn tại — chính sách tool ở khối `tools` cấp gốc, ghi đè ở `agents.entries.*.tools` |
+| `sandbox.network`, `sandbox.limits` | không tồn tại — sandbox chỉ có backend/browser/docker/mode/prune/scope/ssh/workspaceAccess/workspaceRoot |
+| `identity.displayName` | là `identity.name` |
+| `tools.agentToAgent.allowFrom/allowTo` | là `{ enabled, allow }` |
+| `cron.jobs` | **không tồn tại** — lịch là dữ liệu do gateway quản lý, không phải cấu hình. Việc định kỳ của fleet nằm ở `n8n/workflows/03-lich-dinh-ky.json` |
+| `hooks.entries` | là `hooks.mappings` (mảng) |
+| `channels.defaults.dmPolicy` | thuộc từng kênh/account, không phải defaults |
+| `logging.audit.{format,path,include,redact}` | audit chỉ có `{enabled, executionIdentity, messages}`; che dữ liệu dùng `logging.redactPatterns` |
+| model tự host khai trong `agents.defaults.models` | endpoint/khoá thuộc khối `models.providers` cấp gốc |
+| `agents.entries.<id>.default: true` | đã khai tử — cần `agents.ownership: "explicit"` |
+| root `limits`, `content`, `mcp.maxToolsInContext` | không tồn tại |
+
 ### Gateway báo `Invalid --bind`
 
 Hai nguyên nhân, và nguyên nhân thứ hai là bẫy thật sự.
@@ -106,7 +136,7 @@ chỉ IP: `loopback` | `lan` | `tailnet` | `auto` | `custom`. Trong Docker phả
 không gọi tới được). Muốn một IP cụ thể: `bind: "custom"` +
 `gateway.customBindHost`.
 
-**b. Dùng `${BIẾN}` trong cấu hình.** Đây mới là bẫy: **OpenClaw KHÔNG thay thế
+**b. Dùng `${BIẾN}` sai chỗ.** Đây mới là bẫy: **OpenClaw KHÔNG thay thế
 biến môi trường trong `openclaw.json`.** Giá trị được đọc nguyên văn, nên
 `bind: "${OPENCLAW_GATEWAY_BIND:-loopback}"` bị hiểu là chuỗi `${OPENCLAW_...}`
 và báo đúng lỗi trên — không hề nhắc gì tới biến môi trường, nên rất dễ đi tìm
@@ -116,9 +146,15 @@ Ba quy tắc rút ra:
 
 | Nơi | `${BIẾN}` | Ghi chú |
 |---|---|---|
-| Khối `mcp` | **có** thay thế | nhưng KHÔNG hỗ trợ `${BIẾN:-mặc-định}` — cả cụm trong ngoặc bị coi là *tên* biến |
+| Trường credential (`token`, `botToken`, `apiKey`…) | **có** | nhiều trường trong số này là "runtime-mutable" nên KHÔNG nhận SecretRef object — chỉ nhận chuỗi |
+| Khối `mcp` | **có** | |
 | Mọi nơi khác | **không** | viết thẳng giá trị |
-| Secret | dùng `{ source: "env", id: "TÊN_BIẾN" }` | đây là cơ chế duy nhất được hỗ trợ |
+| Cú pháp `${BIẾN:-mặc-định}` | **không, ở bất kỳ đâu** | |
+
+Dạng SecretRef `{ source: "env", provider: "<tên>", id: "TÊN_BIẾN" }` cũng hợp lệ
+nhưng cần đủ **ba** khoá, và `provider` phải là một provider đã khai trong khối
+`secrets` — nếu không, `openclaw security audit` báo *Secret provider is not
+configured*. Với fleet này, mẫu chuỗi `"${BIẾN}"` đơn giản hơn và đủ dùng.
 
 **Cạm bẫy nguy hiểm nhất của quy tắc này:** khai báo
 `env: { vars: { ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}" } }` sẽ đặt khoá API

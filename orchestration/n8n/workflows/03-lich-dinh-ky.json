@@ -1,0 +1,146 @@
+{
+  "name": "Fleet · Việc định kỳ",
+  "meta": {
+    "description": "Bốn việc định kỳ của fleet. Trước đây tôi định đặt chúng trong openclaw.json — nhưng khối `cron` của OpenClaw chỉ có {enabled, triggers, ...}, lịch chạy là dữ liệu do gateway quản lý chứ không phải cấu hình tĩnh. Đặt ở n8n còn đúng hơn về kiến trúc: người vận hành sửa lịch được mà không cần deploy lại gateway."
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Ho_Chi_Minh", "saveDataErrorExecution": "all" },
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "30 8 * * 1-5" }] }
+      },
+      "id": "s-standup",
+      "name": "08:30 T2–T6",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-540, 60]
+    },
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 2 * * *" }] }
+      },
+      "id": "s-sec",
+      "name": "02:00 hằng ngày",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-540, 220]
+    },
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 9 * * 1" }] }
+      },
+      "id": "s-debt",
+      "name": "09:00 thứ Hai",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-540, 380]
+    },
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 */6 * * *" }] }
+      },
+      "id": "s-health",
+      "name": "Mỗi 6 giờ",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-540, 540]
+    },
+
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "a1", "name": "agentId", "value": "analyst", "type": "string" },
+            { "id": "a2", "name": "prompt", "value": "Tổng hợp hoạt động 24h qua: PR đã mở/đã merge, issue chuyển trạng thái, cảnh báo production. Trả về đúng ba mục: Hôm qua / Hôm nay / Vướng mắc.", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "p-standup",
+      "name": "Standup",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-280, 60]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "b1", "name": "agentId", "value": "security", "type": "string" },
+            { "id": "b2", "name": "prompt", "value": "Chạy quét phụ thuộc và quét secret trên nhánh main. Nếu có phát hiện HIGH/CRITICAL, tạo issue và báo vào kênh bảo mật.", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "p-sec",
+      "name": "Quét bảo mật đêm",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-280, 220]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "c1", "name": "agentId", "value": "orchestrator", "type": "string" },
+            { "id": "c2", "name": "prompt", "value": "Rà soát nợ kỹ thuật tuần qua: file thay đổi nhiều nhất, độ phức tạp tăng, test bị bỏ qua. Đề xuất tối đa ba hạng mục ưu tiên kèm ước lượng. Giao cho architect nếu cần ADR.", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "p-debt",
+      "name": "Rà nợ kỹ thuật",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-280, 380]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "d1", "name": "agentId", "value": "sre", "type": "string" },
+            { "id": "d2", "name": "prompt", "value": "Kiểm tra /healthz và /readyz của gateway, độ trễ cầu nối MCP, và hạn mức token còn lại của từng agent. CHỈ báo cáo khi có bất thường.", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "p-health",
+      "name": "Sức khoẻ fleet",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-280, 540]
+    },
+
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENCLAW_GATEWAY_URL }}/hooks/n8n-dispatch",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.OPENCLAW_GATEWAY_TOKEN }}" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ agentId: $json.agentId, prompt: $json.prompt, meta: { source: 'lich-dinh-ky', firedAt: $now.toISO() } }) }}",
+        "options": { "timeout": 600000 }
+      },
+      "id": "dispatch",
+      "name": "Gửi tới agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 300],
+      "notes": "agentId phải nằm trong hooks.allowedAgentIds của OpenClaw (orchestrator, reviewer, sre). Việc gửi tới analyst/security đi qua orchestrator — đó là chủ đích: webhook không được định tuyến tuỳ ý tới mọi agent."
+    }
+  ],
+  "connections": {
+    "08:30 T2–T6": { "main": [[{ "node": "Standup", "type": "main", "index": 0 }]] },
+    "02:00 hằng ngày": { "main": [[{ "node": "Quét bảo mật đêm", "type": "main", "index": 0 }]] },
+    "09:00 thứ Hai": { "main": [[{ "node": "Rà nợ kỹ thuật", "type": "main", "index": 0 }]] },
+    "Mỗi 6 giờ": { "main": [[{ "node": "Sức khoẻ fleet", "type": "main", "index": 0 }]] },
+    "Standup": { "main": [[{ "node": "Gửi tới agent", "type": "main", "index": 0 }]] },
+    "Quét bảo mật đêm": { "main": [[{ "node": "Gửi tới agent", "type": "main", "index": 0 }]] },
+    "Rà nợ kỹ thuật": { "main": [[{ "node": "Gửi tới agent", "type": "main", "index": 0 }]] },
+    "Sức khoẻ fleet": { "main": [[{ "node": "Gửi tới agent", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {}
+}

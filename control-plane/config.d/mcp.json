@@ -1,42 +1,25 @@
 // =============================================================================
 // MCP — kết nối năng lực bên ngoài vào fleet
 // -----------------------------------------------------------------------------
-// QUAN TRỌNG — nguyên tắc "một nguồn sự thật" (single source of truth):
-//   KHÔNG khai báo lại từng MCP server ở đây. Toàn bộ MCP server được quản lý
-//   tập trung trong capability-plane/mcporter.json và mcporter chạy ở chế độ
-//   daemon, phơi ra MỘT cầu nối MCP duy nhất. OpenClaw chỉ cắm vào cầu nối đó.
+// Nguyên tắc "một nguồn sự thật": KHÔNG khai báo lại từng MCP server ở đây.
+// Toàn bộ được quản lý tập trung trong capability-plane/mcporter.json; mcporter
+// chạy `serve --http` và phơi MỘT cầu nối duy nhất. OpenClaw chỉ cắm vào đó.
 //
-// Vì sao?
-//   - Sửa một chỗ, mọi agent (OpenClaw, acpx, LangGraph, n8n) đều thấy.
-//   - Lọc tool (allowedTools/blockedTools) làm ở một nơi → audit dễ.
-//   - OAuth/token nằm trong vault của mcporter, không rải rác trong nhiều file.
+// Khối `mcp` là NƠI DUY NHẤT trong cấu hình OpenClaw có thay thế ${BIẾN} — và
+// nó KHÔNG hỗ trợ ${BIẾN:-mặc-định} (cả cụm trong ngoặc bị coi là TÊN biến).
+// Ở đây dùng giá trị viết thẳng cho bản Docker; K8s thì sửa ConfigMap thành
+// http://mcporter.fleet.svc.cluster.local:7420/mcp
+//
+// SCHEMA: khối `mcp` chỉ nhận { apps, servers }.
+// Lọc tool làm ở mcporter (allowedTools, tên tool CHÍNH XÁC).
 // =============================================================================
 {
   mcp: {
     servers: {
-      // Cầu nối duy nhất tới toàn bộ MCP server đã cấu hình trong mcporter.
-      // `mcporter serve` KHÔNG có xác thực — bảo vệ nằm ở tầng mạng:
-      // Docker không map cổng ra host; K8s dùng NetworkPolicy (deploy/k8s/20-*).
-      // Tên tool ở điểm cuối gộp có tiền tố server: <server>__<tool>.
       "mcporter-bridge": {
         type: "http",
-        // Khối `mcp` là NƠI DUY NHẤT trong cấu hình OpenClaw có thay thế ${BIẾN}
-        // — và nó KHÔNG hỗ trợ cú pháp ${BIẾN:-mặc-định}: cả cụm bên trong dấu
-        // ngoặc bị coi là TÊN biến, nên "${X:-y}" sẽ không bao giờ khớp.
-        // Ở đây dùng giá trị viết thẳng cho bản Docker; K8s thì sửa ConfigMap
-        // thành http://mcporter.fleet.svc.cluster.local:7420/mcp
         url: "http://mcporter:7420/mcp",
-        // Lọc CHÍNH nằm ở mcporter (allowedTools, tên tool chính xác) — xem
-        // capability-plane/mcporter.json. Ở đây chỉ liệt kê thêm những tool
-        // muốn chặn lần hai, bằng TÊN CHÍNH XÁC như cầu nối phơi ra
-        // (dạng <server>__<tool>). Mẫu glob KHÔNG được hỗ trợ ở đâu cả —
-        // xem tên thật bằng: make tools S=<server>
-        blockedTools: [],
       },
     },
-
-    // Giới hạn số tool nạp vào ngữ cảnh mỗi lượt. Vượt ngưỡng thì dùng
-    // "skill pattern": agent gọi CLI do mcporter sinh ra thay vì nạp hết tool.
-    maxToolsInContext: 40,
   },
 }

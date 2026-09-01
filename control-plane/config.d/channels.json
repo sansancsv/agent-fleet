@@ -1,32 +1,49 @@
 // =============================================================================
 // CHANNELS — các kênh chat mà con người dùng để nói chuyện với fleet
 // -----------------------------------------------------------------------------
-// Mỗi PHÒNG BAN nên có một `accountId` riêng (một bot riêng), vì:
+// Mỗi PHÒNG BAN nên có một `accountId` riêng (một bot riêng):
 //   - phân quyền theo phòng ban làm ở tầng binding, không phải trong prompt;
 //   - thu hồi quyền = tắt một bot, không ảnh hưởng phòng ban khác;
 //   - hoá đơn và audit tách bạch theo accountId.
+//
+// SCHEMA: `channels.defaults` chỉ nhận botLoopProtection, contextVisibility,
+// groupPolicy, heartbeatVisibility, implicitMentions. `dmPolicy` và
+// `requireMention` là thuộc TỪNG KÊNH (hoặc từng account), không phải defaults.
 // =============================================================================
 {
   channels: {
+    defaults: {
+      groupPolicy: "allowlist",
+      // `implicitMentions` là OBJECT, không phải boolean.
+      implicitMentions: { replyToBot: false, quotedBot: false, threadParticipation: false },
+    },
+
     slack: {
       enabled: true,
+      dmPolicy: "allowlist",
+      groupPolicy: "allowlist",
+      requireMention: true,
+      defaultAccount: "acc-engineering",
+      // Token của kênh là credential "runtime-mutable" (lệnh `openclaw channels
+      // login` ghi đè được), nên KHÔNG nhận SecretRef object — chỉ nhận chuỗi.
+      // Ở surface này mẫu "${BIẾN}" được hỗ trợ.
       accounts: {
         "acc-engineering": {
-          botToken: { source: "env", id: "SLACK_BOT_TOKEN_ENGINEERING" },
-          appToken: { source: "env", id: "SLACK_APP_TOKEN_ENGINEERING" },
+          botToken: "${SLACK_BOT_TOKEN_ENGINEERING}",
+          appToken: "${SLACK_APP_TOKEN_ENGINEERING}",
           dmPolicy: "allowlist",
           groupPolicy: "allowlist",
           requireMention: true,
         },
         "acc-marketing": {
-          botToken: { source: "env", id: "SLACK_BOT_TOKEN_MARKETING" },
-          appToken: { source: "env", id: "SLACK_APP_TOKEN_MARKETING" },
+          botToken: "${SLACK_BOT_TOKEN_MARKETING}",
+          appToken: "${SLACK_APP_TOKEN_MARKETING}",
           dmPolicy: "allowlist",
           requireMention: true,
         },
         "acc-finance": {
-          botToken: { source: "env", id: "SLACK_BOT_TOKEN_FINANCE" },
-          appToken: { source: "env", id: "SLACK_APP_TOKEN_FINANCE" },
+          botToken: "${SLACK_BOT_TOKEN_FINANCE}",
+          appToken: "${SLACK_APP_TOKEN_FINANCE}",
           dmPolicy: "allowlist",
           requireMention: true,
         },
@@ -34,38 +51,42 @@
     },
 
     telegram: {
-      enabled: false, // bật khi cần kênh cảnh báo ngoài giờ cho SRE
-      accounts: {
-        alerts: { botToken: { source: "env", id: "TELEGRAM_BOT_TOKEN_ALERTS" }, dmPolicy: "allowlist" },
-      },
+      enabled: false,   // bật khi cần kênh cảnh báo ngoài giờ cho SRE
     },
-
-    discord: { enabled: false },
-    whatsapp: { enabled: false },
   },
 
-  // --- Webhook ingress: nơi n8n / GitHub / Linear đẩy sự kiện vào fleet ------
+  // --- Webhook ingress: nơi n8n / GitHub / Alertmanager đẩy sự kiện vào ------
+  // SCHEMA: hooks nhận { enabled, path, token, mappings, presets, ... }.
+  // `mappings` là MẢNG các luật match → agent, không phải object `entries`.
   hooks: {
     enabled: true,
-    entries: {
-      // n8n gọi vào đây khi một quy trình xác định cần một bước phi xác định.
-      "n8n-dispatch": {
-        path: "/hooks/n8n-dispatch",
-        auth: { mode: "hmac", secret: { source: "env", id: "HOOK_SECRET_N8N" } },
+    path: "/hooks",
+    // BẮT BUỘC: không có allowlist này, `openclaw security audit` báo CRITICAL —
+    // mọi lời gọi webhook đã xác thực đều định tuyến được tới BẤT KỲ agent nào,
+    // kể cả agent mặc định khi bỏ trống agentId.
+    allowedAgentIds: ["orchestrator", "reviewer", "sre"],
+    // Giữ mọi lượt chạy từ webhook trong một phiên đã biết, thay vì sinh khoá
+    // phiên ngẫu nhiên mỗi request (security audit khuyến nghị).
+    defaultSessionKey: "hook:ingress",
+    // hooks.token là credential "runtime-mutable": KHÔNG nhận SecretRef object,
+    // chỉ nhận chuỗi — và ở surface này mẫu "${BIẾN}" được hỗ trợ.
+    token: "${HOOK_SECRET_N8N}",
+    mappings: [
+      {
+        id: "n8n-dispatch",
+        match: { path: "/hooks/n8n-dispatch" },
         agentId: "orchestrator",
       },
-      // GitHub gửi pull_request events → kích hoạt reviewer.
-      "github-pr": {
-        path: "/hooks/github-pr",
-        auth: { mode: "hmac", secret: { source: "env", id: "HOOK_SECRET_GITHUB" } },
+      {
+        id: "github-pr",
+        match: { path: "/hooks/github-pr" },
         agentId: "reviewer",
       },
-      // Alertmanager → SRE.
-      "alerts": {
-        path: "/hooks/alerts",
-        auth: { mode: "bearer", token: { source: "env", id: "HOOK_TOKEN_ALERTS" } },
+      {
+        id: "alerts",
+        match: { path: "/hooks/alerts" },
         agentId: "sre",
       },
-    },
+    ],
   },
 }

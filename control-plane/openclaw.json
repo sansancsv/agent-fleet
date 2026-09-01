@@ -1,42 +1,46 @@
 // =============================================================================
-// OpenClaw Gateway — cấu hình gốc (root config) của Agent Fleet
+// OpenClaw Gateway — cấu hình gốc của Agent Fleet
 // -----------------------------------------------------------------------------
-// File này được mount vào container tại /home/node/.openclaw/openclaw.json
-// Định dạng: JSON5 (cho phép comment + trailing comma).
-// Cấu hình được tách nhỏ bằng `$include` để mỗi phòng ban / mỗi nhóm quan tâm
-// chỉ phải sửa đúng một file, tránh xung đột merge.
+// Mount vào /home/node/.openclaw/openclaw.json. Định dạng JSON5.
 //
-// Kiểm tra sau khi sửa:
-//   openclaw config validate
-//   openclaw security audit
+// HAI QUY TẮC ĐÃ TRẢ GIÁ ĐỂ BIẾT (đối chiếu với OpenClaw 2026.8.1):
+//
+//  1. Cấu hình KHÔNG thay thế ${BIẾN}. Giá trị được đọc nguyên văn ở mọi nơi
+//     trừ khối `mcp`. Viết bind: "${OPENCLAW_GATEWAY_BIND:-lan}" sẽ được hiểu
+//     đúng là chuỗi đó và gateway báo `Invalid --bind`.
+//     Tham chiếu secret: { source: "env", provider: "<tên>", id: "TÊN_BIẾN" }
+//     — bắt buộc đủ ba khoá. Một số trường credential "runtime-mutable"
+//     (ví dụ hooks.token) KHÔNG nhận SecretRef mà chỉ nhận chuỗi, và ở đó
+//     mẫu "${TÊN_BIẾN}" lại được hỗ trợ. Trình kiểm tra sẽ nói rõ trường nào.
+//
+//  2. Schema là NGHIÊM NGẶT: mọi khoá lạ đều làm gateway từ chối khởi động
+//     ("Unrecognized keys"). Trước khi thêm khoá mới, tra schema thật:
+//         openclaw config schema | jq '.properties.<khối>.properties | keys'
+//     hoặc chạy  make oc-validate  (kiểm tra bằng chính binary OpenClaw).
 // =============================================================================
 {
-  $schema: "https://docs.openclaw.ai/schemas/openclaw.json",
-
   // --- Gateway: cổng vào duy nhất của toàn bộ fleet -------------------------
   gateway: {
     mode: "local",
-    // `bind` nhận MỘT TRONG NĂM GIÁ TRỊ, không phải địa chỉ IP:
-    //   loopback (mặc định, chỉ 127.0.0.1) | lan | tailnet | auto | custom
-    // Trong Docker/K8s phải là "lan" thì container khác mới gọi tới được —
-    // và bắt buộc đi kèm auth token + NetworkPolicy (xem deploy/k8s).
-    // Muốn một IP cụ thể: bind: "custom" + gateway.customBindHost: "10.0.0.5".
-    // GIÁ TRỊ VIẾT THẲNG, không dùng ${BIẾN}. OpenClaw đọc khoá này NGUYÊN VĂN:
-    // ngoài khối `mcp`, cấu hình KHÔNG hề thay thế biến môi trường. Viết
-    // "${OPENCLAW_GATEWAY_BIND:-loopback}" ở đây sẽ được hiểu đúng là chuỗi đó
-    // và gateway báo: Invalid --bind.
-    // File này là cấu hình cho bản Docker → "lan". Chạy thẳng trên máy thì đổi
-    // thành "loopback".
+    // Chỉ nhận: loopback | lan | tailnet | auto | custom — KHÔNG phải địa chỉ IP.
+    // Trong Docker phải là "lan" thì container khác mới gọi tới được.
+    // Chạy thẳng trên máy thì đổi thành "loopback".
     bind: "lan",
     port: 18789,
+    auth: {
+      mode: "token",
+      // Dạng SecretRef { source, provider, id } cũng hợp lệ, NHƯNG `provider`
+      // phải là một secret provider đã khai báo trong khối `secrets` — nếu không,
+      // security audit báo: Secret provider "..." is not configured.
+      // Mẫu chuỗi "${BIẾN}" đơn giản hơn và được hỗ trợ ở surface này.
+      token: "${OPENCLAW_GATEWAY_TOKEN}",
+      // Chống dò khoá. Không có khối này, security audit báo WARN
+      // "No auth rate limiting configured".
+      rateLimit: { maxAttempts: 8, windowMs: 60000, lockoutMs: 900000, exemptLoopback: true },
+    },
     controlUi: {
       allowedOrigins: ["http://localhost:18789", "http://127.0.0.1:18789"],
     },
-    auth: {
-      mode: "token",
-      token: { source: "env", id: "OPENCLAW_GATEWAY_TOKEN" },
-    },
-    // Danh sách proxy tin cậy để đọc đúng X-Forwarded-For (ingress-nginx).
     trustedProxies: ["10.0.0.0/8", "172.16.0.0/12"],
   },
 
@@ -52,14 +56,12 @@
   ],
 
   // --- Biến môi trường -------------------------------------------------------
-  // CỐ Ý KHÔNG khai báo `env.vars` ở đây.
+  // CỐ Ý KHÔNG khai báo `env.vars`.
   //   `env.vars` ghi thẳng giá trị ra biến môi trường của tiến trình. Vì cấu hình
-  //   KHÔNG thay thế ${BIẾN}, viết ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}" sẽ
-  //   đặt khoá API thành đúng chuỗi 12 ký tự đó — ghi đè khoá thật mà Docker đã
-  //   tiêm vào, và mọi lệnh gọi model đều hỏng với lỗi xác thực khó hiểu.
-  //   Khoá API đến từ `environment:` trong docker-compose (hoặc Secret ở K8s).
-  //   Nơi duy nhất trong cấu hình được tham chiếu secret an toàn là dạng
-  //   { source: "env", id: "TÊN_BIẾN" } — xem channels.json.
+  //   không thay thế ${BIẾN}, viết ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}" sẽ
+  //   đặt khoá API thành đúng chuỗi đó — ghi đè khoá thật Docker đã tiêm vào, rồi
+  //   mọi lệnh gọi model hỏng với lỗi xác thực chẳng liên quan gì.
+  //   Khoá API đến từ `environment:` của docker-compose (hoặc Secret ở K8s).
   env: {
     // Không kế thừa toàn bộ shell env của host — giảm rò rỉ secret.
     shellEnv: { enabled: false },

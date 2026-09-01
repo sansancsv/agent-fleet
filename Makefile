@@ -13,10 +13,10 @@ help:  ## Hiện danh sách lệnh
 # --- Vòng đời ---------------------------------------------------------------
 .PHONY: bootstrap
 bootstrap:  ## Cài công cụ, sinh khoá, kiểm tra tiên quyết
-	./bootstrap.sh
+	bash ./bootstrap.sh
 
 .PHONY: up
-up: validate  ## Khởi động toàn bộ ngăn xếp
+up: validate oc-validate  ## Khởi động toàn bộ ngăn xếp
 	$(COMPOSE) up -d --build
 	@$(MAKE) --no-print-directory health
 
@@ -33,17 +33,21 @@ logs:  ## Theo dõi log (dùng: make logs S=openclaw-gateway)
 	$(COMPOSE) logs -f $(S)
 
 # --- Kiểm chứng -------------------------------------------------------------
+.PHONY: oc-validate
+oc-validate:  ## Kiểm chứng cấu hình OpenClaw bằng CHÍNH binary OpenClaw
+	@bash ./scripts/oc-validate.sh
+
 .PHONY: preflight
 preflight:  ## Đối chiếu CLI thật đã cài với những gì repo giả định
 	./scripts/preflight.sh
 
 .PHONY: validate
 validate:  ## Kiểm tra cú pháp và tính nhất quán của mọi cấu hình
-	./scripts/validate.sh
+	bash ./scripts/validate.sh
 
 .PHONY: health
 health:  ## Chờ và kiểm tra sức khoẻ các dịch vụ (có retry — không báo lỗi giả)
-	@./scripts/health.sh
+	@bash ./scripts/health.sh
 
 .PHONY: audit
 audit:  ## Chạy rà soát bảo mật của OpenClaw + test chính sách OPA
@@ -83,7 +87,7 @@ export-workflows:  ## Xuất workflow n8n ra git (chạy sau khi sửa trên gia
 
 .PHONY: publish-skills
 publish-skills:  ## Xuất bản skill nội bộ lên ClawHub (dùng: make publish-skills V=1.2.0)
-	cd distribution-plane/skills && ./publish.sh $(V)
+	cd distribution-plane/skills && bash ./publish.sh $(V)
 
 # --- Chạy thử ---------------------------------------------------------------
 .PHONY: demo-flow

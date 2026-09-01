@@ -1,147 +1,162 @@
 // =============================================================================
-// ĐỘI HÌNH AGENT (agent roster) — 9 vai trò chuẩn cho một code team enterprise
+// ĐỘI HÌNH AGENT — 9 vai trò cho một code team enterprise
 // -----------------------------------------------------------------------------
 // Nguyên tắc thiết kế:
-//   1. MỘT VAI TRÒ = MỘT AGENT ID = MỘT WORKSPACE = MỘT TOOL POLICY.
-//      Không dùng "một agent vạn năng": không phân quyền được, không audit được.
-//   2. QUYỀN GHI LÀ ĐẶC QUYỀN. Chỉ implementer/sre được `write`+`exec`.
-//      reviewer/security/analyst là read-only — đây là lớp kiểm soát chéo.
-//   3. MODEL ĐA NHÀ CUNG CẤP (multi-provider): mỗi vai trò có primary + fallbacks
-//      để không phụ thuộc một nhà cung cấp và tự động chuyển khi rate-limit.
-//   4. Vai trò "reviewer" cố tình dùng model KHÁC implementer để tránh
-//      "mù lỗi đồng nhất" (correlated blind spot).
+//   1. MỘT VAI TRÒ = MỘT AGENT ID = MỘT WORKSPACE = MỘT CHÍNH SÁCH TOOL.
+//   2. QUYỀN GHI LÀ ĐẶC QUYỀN. Chỉ implementer/tester được write+exec.
+//   3. MODEL ĐA NHÀ CUNG CẤP: mỗi vai trò có primary + fallbacks.
+//   4. `reviewer` cố tình dùng model KHÁC NHÀ CUNG CẤP với `implementer`
+//      để tránh mù lỗi đồng nhất.
+//
+// LƯU Ý VỀ SCHEMA (đã đối chiếu OpenClaw 2026.8.1):
+//   • `agents.defaults` KHÔNG có `tools` — chính sách tool mặc định đặt ở khối
+//     `tools` cấp gốc; ghi đè theo vai trò ở `agents.entries.<id>.tools`.
+//   • `sandbox` chỉ nhận: backend, browser, docker, mode, prune, scope,
+//     sessionToolsVisibility, ssh, workspaceAccess, workspaceRoot.
+//     Không có `network`, không có `limits`.
+//   • `identity` chỉ nhận: avatar, emoji, name, theme. Không có `displayName`.
+//   • `agents.*.models.<id>` chỉ nhận: agentRuntime, alias, codeMode, params,
+//     streaming. Endpoint/khoá của model tự host thuộc `models.providers`
+//     (xem models.json).
 // =============================================================================
 {
+  // --- Chính sách tool MẶC ĐỊNH cho toàn fleet -------------------------------
+  // Mặc định chỉ đọc. Vai trò nào cần ghi/chạy thì tự mở trong entries.
+  tools: {
+    deny: ["fs_write", "exec"],
+    agentToAgent: {
+      enabled: true,
+      // Chỉ orchestrator được phép khởi tạo hội thoại chéo.
+      allow: ["orchestrator"],
+    },
+  },
+
   agents: {
-    // --- Giá trị mặc định, mọi agent kế thừa nếu không ghi đè ---------------
+    // BẮT BUỘC với đội hình nhiều agent. Không có dòng này, OpenClaw đòi một
+    // "legacy default=true marker" (đã khai tử) và từ chối khởi động:
+    //   agents.ownership: multi-agent rosters require agents.ownership="explicit"
+    ownership: "explicit",
+
     defaults: {
       workspace: "/home/node/.openclaw/workspaces/_shared",
       model: {
         primary: "anthropic/claude-sonnet-4-6",
         fallbacks: ["openai/gpt-5.4", "google/gemini-3-pro"],
       },
-      // Sandbox mặc định: mọi tool chạy trong container riêng, phạm vi agent.
-      sandbox: { mode: "all", scope: "agent" },
-      // Mặc định KHÔNG cho ghi/chạy lệnh. Vai trò nào cần thì tự mở.
-      tools: { allow: ["read", "search", "fetch"], deny: ["write", "exec"] },
+      sandbox: {
+        mode: "all",              // off | non-main | all
+        scope: "agent",           // session | agent | shared
+        workspaceAccess: "rw",    // none | ro | rw
+      },
       skills: ["fleet-code-review", "fleet-adr", "fleet-release-gate"],
       bootstrapMaxChars: 24000,
       bootstrapTotalMaxChars: 64000,
-      maxSkillsPromptChars: 12000,
-      heartbeat: { every: "60m", target: "owner" },
+      heartbeat: { every: "60m" },
     },
 
     entries: {
-      // ---------------------------------------------------------------------
-      // 1) ORCHESTRATOR — "trưởng nhóm". Nhận yêu cầu, phân rã, giao việc.
-      //    Không tự viết code. Chỉ gọi agent khác (agent-to-agent) và mở flow.
-      // ---------------------------------------------------------------------
+      // 1) ĐIỀU PHỐI — nhận yêu cầu, phân rã, giao việc. Không tự viết code.
       orchestrator: {
-        default: true,
+        // KHÔNG dùng `default: true` — khoá này đã bị khai tử ("Removed retired
+        // agents.entries.*.default markers"). Agent mặc định được quyết định bởi
+        // luật bắt-tất-cả cuối cùng trong bindings.json.
+        name: "Orchestrator",
+        description: "Điều phối viên: phân rã yêu cầu và giao cho đúng vai trò",
         workspace: "/home/node/.openclaw/workspaces/orchestrator",
         model: { primary: "anthropic/claude-opus-4-6", fallbacks: ["openai/gpt-5.4"] },
         skills: ["fleet-dept-intake", "fleet-release-gate"],
-        tools: { allow: ["read", "search", "fetch", "agent_send", "exec"], deny: ["write"] },
-        identity: { emoji: "🧭", displayName: "Orchestrator" },
+        tools: { deny: ["fs_write"] },
+        identity: { emoji: "🧭", name: "Orchestrator" },
       },
 
-      // ---------------------------------------------------------------------
-      // 2) ARCHITECT — thiết kế, ADR (Architecture Decision Record).
-      //    Được ghi, nhưng chỉ trong thư mục tài liệu (giới hạn bằng workspace).
-      // ---------------------------------------------------------------------
+      // 2) KIẾN TRÚC — ADR. Ghi tài liệu, không chạy lệnh.
       architect: {
+        name: "Architect",
+        description: "Kiến trúc sư: viết ADR, không viết code",
         workspace: "/home/node/.openclaw/workspaces/architect",
         model: { primary: "anthropic/claude-opus-4-6", fallbacks: ["google/gemini-3-pro"] },
         skills: ["fleet-adr"],
-        tools: { allow: ["read", "search", "fetch", "write"], deny: ["exec"] },
-        identity: { emoji: "📐", displayName: "Architect" },
+        tools: { alsoAllow: ["fs_write"], deny: ["exec"] },
+        identity: { emoji: "📐", name: "Architect" },
       },
 
-      // ---------------------------------------------------------------------
-      // 3) IMPLEMENTER — vai trò DUY NHẤT được ghi code + chạy lệnh trong repo.
-      //    Luôn làm trên git worktree riêng (xem execution-plane/flows).
-      // ---------------------------------------------------------------------
+      // 3) HIỆN THỰC — vai trò DUY NHẤT toàn quyền trong repo.
       implementer: {
+        name: "Implementer",
+        description: "Lập trình viên: vai trò duy nhất được ghi mã nguồn",
         workspace: "/home/node/.openclaw/workspaces/implementer",
         model: { primary: "anthropic/claude-sonnet-4-6", fallbacks: ["openai/gpt-5.4-codex"] },
         skills: [],
-        tools: { allow: ["read", "search", "fetch", "write", "exec"], deny: [] },
-        sandbox: { mode: "all", scope: "agent", network: "restricted" },
-        identity: { emoji: "🔨", displayName: "Implementer" },
+        tools: { alsoAllow: ["fs_write", "exec"] },
+        sandbox: { mode: "all", scope: "agent", workspaceAccess: "rw" },
+        identity: { emoji: "🔨", name: "Implementer" },
       },
 
-      // ---------------------------------------------------------------------
-      // 4) REVIEWER — read-only. Model khác implementer để soi lỗi độc lập.
-      // ---------------------------------------------------------------------
+      // 4) THẨM ĐỊNH — chỉ đọc, model KHÁC NHÀ CUNG CẤP với implementer.
       reviewer: {
+        name: "Reviewer",
+        description: "Thẩm định viên: chỉ đọc, chạy trên nhà cung cấp model khác",
         workspace: "/home/node/.openclaw/workspaces/reviewer",
         model: { primary: "openai/gpt-5.4", fallbacks: ["google/gemini-3-pro"] },
         skills: ["fleet-code-review"],
-        tools: { allow: ["read", "search"], deny: ["write", "exec", "fetch"] },
-        identity: { emoji: "🔍", displayName: "Reviewer" },
+        tools: { deny: ["fs_write", "exec", "web"] },
+        sandbox: { mode: "all", scope: "agent", workspaceAccess: "ro" },
+        identity: { emoji: "🔍", name: "Reviewer" },
       },
 
-      // ---------------------------------------------------------------------
-      // 5) TESTER — viết và chạy test. Ghi được nhưng chỉ trong thư mục test.
-      // ---------------------------------------------------------------------
+      // 5) KIỂM THỬ — ghi và chạy test.
       tester: {
+        name: "Tester",
+        description: "Kỹ sư kiểm thử: viết và chạy test",
         workspace: "/home/node/.openclaw/workspaces/tester",
         model: { primary: "anthropic/claude-sonnet-4-6", fallbacks: ["openai/gpt-5.4"] },
-        tools: { allow: ["read", "search", "write", "exec"], deny: ["fetch"] },
-        sandbox: { mode: "all", scope: "agent", network: "none" },
-        identity: { emoji: "🧪", displayName: "Tester" },
+        tools: { alsoAllow: ["fs_write", "exec"], deny: ["web"] },
+        sandbox: { mode: "all", scope: "agent", workspaceAccess: "rw" },
+        identity: { emoji: "🧪", name: "Tester" },
       },
 
-      // ---------------------------------------------------------------------
-      // 6) SECURITY — read-only tuyệt đối. Quét secret, SAST, mô hình mối đe doạ.
-      // ---------------------------------------------------------------------
+      // 6) BẢO MẬT — chỉ đọc + chạy trình quét, không ra mạng.
       security: {
+        name: "Security",
+        description: "Kỹ sư bảo mật: rà soát, chỉ đọc",
         workspace: "/home/node/.openclaw/workspaces/security",
         model: { primary: "anthropic/claude-opus-4-6", fallbacks: ["openai/gpt-5.4"] },
-        tools: { allow: ["read", "search", "exec"], deny: ["write", "fetch"] },
-        sandbox: { mode: "all", scope: "agent", network: "none" },
-        identity: { emoji: "🛡️", displayName: "Security" },
+        tools: { alsoAllow: ["exec"], deny: ["fs_write", "web"] },
+        sandbox: { mode: "all", scope: "agent", workspaceAccess: "ro" },
+        identity: { emoji: "🛡️", name: "Security" },
       },
 
-      // ---------------------------------------------------------------------
-      // 7) DOCS — tài liệu kỹ thuật, changelog, release note.
-      // ---------------------------------------------------------------------
+      // 7) TÀI LIỆU
       "docs-writer": {
+        name: "Docs",
+        description: "Người viết tài liệu kỹ thuật",
         workspace: "/home/node/.openclaw/workspaces/docs-writer",
         model: { primary: "google/gemini-3-pro", fallbacks: ["anthropic/claude-sonnet-4-6"] },
-        tools: { allow: ["read", "search", "fetch", "write"], deny: ["exec"] },
-        identity: { emoji: "📚", displayName: "Docs" },
+        tools: { alsoAllow: ["fs_write"], deny: ["exec"] },
+        identity: { emoji: "📚", name: "Docs" },
       },
 
-      // ---------------------------------------------------------------------
-      // 8) SRE — triển khai, sự cố, runbook. Có exec nhưng KHÔNG có write vào repo.
-      // ---------------------------------------------------------------------
+      // 8) VẬN HÀNH — chạy lệnh được, KHÔNG ghi mã nguồn.
       sre: {
+        name: "SRE",
+        description: "Vận hành: triển khai và xử lý sự cố",
         workspace: "/home/node/.openclaw/workspaces/sre",
         model: { primary: "anthropic/claude-sonnet-4-6", fallbacks: ["openai/gpt-5.4"] },
-        tools: { allow: ["read", "search", "fetch", "exec"], deny: ["write"] },
-        identity: { emoji: "🚨", displayName: "SRE" },
+        tools: { alsoAllow: ["exec"], deny: ["fs_write"] },
+        sandbox: { mode: "all", scope: "agent", workspaceAccess: "ro" },
+        identity: { emoji: "🚨", name: "SRE" },
       },
 
-      // ---------------------------------------------------------------------
-      // 9) ANALYST — số liệu, báo cáo. Dùng chung cho mọi phòng ban.
-      // ---------------------------------------------------------------------
+      // 9) PHÂN TÍCH — dùng chung cho mọi phòng ban, chỉ đọc.
       analyst: {
+        name: "Analyst",
+        description: "Chuyên viên phân tích số liệu, dùng chung mọi phòng ban",
         workspace: "/home/node/.openclaw/workspaces/analyst",
         model: { primary: "google/gemini-3-pro", fallbacks: ["anthropic/claude-sonnet-4-6"] },
-        tools: { allow: ["read", "search", "fetch"], deny: ["write", "exec"] },
-        identity: { emoji: "📊", displayName: "Analyst" },
+        tools: { deny: ["fs_write", "exec"] },
+        sandbox: { mode: "all", scope: "agent", workspaceAccess: "ro" },
+        identity: { emoji: "📊", name: "Analyst" },
       },
-    },
-  },
-
-  // --- Cho phép agent gọi agent (bắt buộc để orchestrator điều phối) ---------
-  tools: {
-    agentToAgent: {
-      enabled: true,
-      // Chỉ orchestrator được phép khởi tạo hội thoại chéo.
-      allowFrom: ["orchestrator"],
-      allowTo: ["architect", "implementer", "reviewer", "tester", "security", "docs-writer", "sre", "analyst"],
     },
   },
 }

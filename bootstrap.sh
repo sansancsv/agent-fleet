@@ -62,7 +62,10 @@ fi
 echo; echo "4) Quyền thư mục"
 chmod 700 control-plane 2>/dev/null || true
 find . -name '*.sh' -exec chmod +x {} \;
-ok "script đã có quyền chạy"
+# `openclaw security audit` coi tệp cấu hình 644 là CRITICAL: chúng có thể chứa
+# token và thiết lập riêng tư. Git không giữ được quyền này nên phải đặt lại ở đây.
+chmod 600 control-plane/openclaw.json control-plane/config.d/*.json 2>/dev/null || true
+ok "script có quyền chạy, cấu hình đặt quyền 600"
 
 # --- 5. Kiểm chứng cấu hình -------------------------------------------------
 echo; echo "5) Kiểm chứng cấu hình"

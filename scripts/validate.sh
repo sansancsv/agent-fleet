@@ -87,38 +87,19 @@ if grep -q 'OPENCLAW_GATEWAY_BIND' deploy/docker/docker-compose.yml 2>/dev/null 
   fail "compose vẫn đặt OPENCLAW_GATEWAY_BIND — biến này KHÔNG có tác dụng; bind chỉ đọc từ openclaw.json"
 fi
 
-# --- 6c. OpenClaw KHÔNG thay thế ${BIẾN} (trừ khối `mcp`) ------------------
-# Đây là lớp lỗi đắt nhất đã gặp: cấu hình đúng cú pháp JSON, gateway vẫn chết,
-# và thông báo lỗi không hề nhắc tới biến môi trường.
-#   • ngoài khối `mcp`: giá trị bị đọc NGUYÊN VĂN → "${X}" thành chuỗi "${X}"
-#   • trong khối `mcp`: có thay thế ${X}, nhưng KHÔNG có ${X:-mặc-định}
-echo; echo "6c) OpenClaw — không dùng \${BIẾN} sai chỗ"
-OC_BAD=0
-for f in control-plane/openclaw.json control-plane/config.d/*.json; do
-  # Chỉ bỏ dòng chú thích NGUYÊN DÒNG. Không dùng 's|//.*||' vì nó sẽ cắt luôn
-  # phần sau "https://" và làm lọt mất lỗi trong các URL.
-  HITS=$(sed 's|^[[:space:]]*//.*$||' "$f" | grep -oE '\$\{[^}]*\}' | sort -u || true)
-  [[ -z "$HITS" ]] && continue
-  if [[ "$(basename "$f")" == "mcp.json" ]]; then
-    while IFS= read -r h; do
-      [[ -z "$h" ]] && continue
-      if [[ "$h" == *":-"* ]]; then
-        fail "$f: '$h' — khối mcp không hỗ trợ cú pháp \${BIẾN:-mặc-định}"; OC_BAD=1
-      fi
-    done <<< "$HITS"
-  else
-    fail "$f: cấu hình ngoài khối mcp bị đọc nguyên văn, bỏ \${BIẾN} đi:"
-    echo "$HITS" | sed 's/^/     /'; OC_BAD=1
-  fi
-done
-(( OC_BAD )) || pass "không có \${BIẾN} sai chỗ trong cấu hình OpenClaw"
-
-# `env.vars` viết literal sẽ GHI ĐÈ khoá API thật mà Docker tiêm vào.
-if python3 scripts/json5_to_json.py control-plane/openclaw.json \
-   | python3 -c "import json,sys; sys.exit(0 if (json.load(sys.stdin).get('env') or {}).get('vars') else 1)" 2>/dev/null; then
-  fail "openclaw.json khai báo env.vars — nó ghi thẳng ra biến môi trường và sẽ ghi đè khoá API do Docker tiêm vào. Bỏ khối này đi."
+# --- 6c. OpenClaw: ${BIẾN} chỉ hợp lệ ở đúng vài chỗ ------------------------
+# Quy tắc đã đối chiếu với binary OpenClaw 2026.8.1:
+#   • Trường credential (token, botToken, apiKey…) CHẤP NHẬN mẫu "${BIẾN}".
+#   • Khối `mcp` cũng có thay thế ${BIẾN}.
+#   • MỌI CHỖ KHÁC bị đọc nguyên văn — "${X}" là chuỗi "${X}", không phải giá trị.
+#   • Cú pháp ${BIẾN:-mặc-định} KHÔNG được hỗ trợ ở bất kỳ đâu.
+# `make oc-validate` chạy chính binary và bắt được nhiều hơn; phép kiểm này để
+# bắt sớm hai lỗi mà binary chỉ cảnh báo nhẹ hoặc không nói gì.
+echo; echo "6c) OpenClaw — vị trí hợp lệ của \${BIẾN}"
+if python3 scripts/check-oc-placeholders.py control-plane/openclaw.json control-plane/config.d/*.json; then
+  pass "\${BIẾN} chỉ xuất hiện ở trường credential; không có cú pháp :- ; không có env.vars"
 else
-  pass "không khai báo env.vars (khoá API đến từ Docker/K8s)"
+  FAIL=1
 fi
 
 # --- 7. NHẤT QUÁN: hồ sơ phòng ban trỏ tới gói năng lực có thật -------------
