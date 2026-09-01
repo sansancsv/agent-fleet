@@ -96,6 +96,71 @@ print(a.get('drafter',''), a.get('reviewer',''), d.get('dataClass',''))
   fi
 done
 
+# --- 8b. mcporter: đối chiếu với SCHEMA THẬT của bản đã cài -----------------
+# Đây là phép kiểm tra đắt giá nhất trong script: nó bắt đúng loại lỗi chỉ lộ ra
+# lúc container khởi động (khoá chú thích trong mcpServers, lifecycle thiếu
+# `mode`, biến môi trường không có giá trị mặc định, glob trong danh sách tool).
+echo; echo "8b) mcporter — schema và quy ước"
+MP_CFG=capability-plane/mcporter.json
+
+if command -v mcporter >/dev/null 2>&1; then
+  MP_SCHEMA="$(dirname "$(readlink -f "$(command -v mcporter)")")/../dist/config-schema.js"
+  if [[ -f "$MP_SCHEMA" ]]; then
+    if OUTPUT=$(node -e "
+      const { RawConfigSchema } = require('$MP_SCHEMA');
+      const cfg = JSON.parse(require('fs').readFileSync('$MP_CFG', 'utf8'));
+      const r = RawConfigSchema.safeParse(cfg);
+      if (!r.success) {
+        for (const i of r.error.issues) console.log('  ' + i.path.join('.') + ': ' + i.message);
+        process.exit(1);
+      }
+    " 2>&1); then
+      pass "khớp schema của mcporter $(mcporter --version 2>/dev/null)"
+    else
+      fail "mcporter.json KHÔNG khớp schema:"; echo "$OUTPUT"
+    fi
+  else
+    echo "  (không tìm thấy schema trong gói mcporter — bỏ qua)"
+  fi
+else
+  echo "  (chưa cài mcporter — bỏ qua kiểm tra schema)"
+fi
+
+python3 - "$MP_CFG" <<'PYCHK'
+import json, sys, re
+cfg = json.load(open(sys.argv[1], encoding="utf-8"))
+servers = cfg.get("mcpServers", {})
+bad = []
+
+# Biến môi trường không có giá trị mặc định làm HỎNG TOÀN BỘ việc nạp cấu hình,
+# không chỉ server thiếu biến đó. Chỉ quét trong mcpServers — khoá "//" ở cấp
+# gốc là chú thích, không được resolve.
+BARE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
+for name, entry in servers.items():
+    for hit in BARE.findall(json.dumps(entry, ensure_ascii=False)):
+        bad.append(f"{name}: {hit} thiếu giá trị mặc định — dùng ${{VAR:-mặc-định}}")
+
+for name, entry in servers.items():
+    if not isinstance(entry, dict):
+        bad.append(f"{name}: mỗi mục trong mcpServers phải là object (không đặt được khoá chú thích ở đây)")
+        continue
+    lc = entry.get("lifecycle")
+    if isinstance(lc, dict) and "mode" not in lc:
+        bad.append(f"{name}.lifecycle: thiếu 'mode' (phải là keep-alive hoặc ephemeral)")
+    mode = lc if isinstance(lc, str) else (lc or {}).get("mode")
+    if mode == "ephemeral":
+        bad.append(f"{name}: lifecycle ephemeral -> 'mcporter serve' KHONG phoi server nay ra cau noi")
+    for key in ("allowedTools", "blockedTools"):
+        for tool in entry.get(key, []) or []:
+            if re.search(r"[*?\[]", tool):
+                bad.append(f"{name}.{key}: '{tool}' — tên tool phải chính xác, không dùng glob")
+    if "allowedTools" in entry and "blockedTools" in entry:
+        bad.append(f"{name}: không được khai báo cả allowedTools lẫn blockedTools")
+print("\n".join("  " + b for b in bad))
+sys.exit(1 if bad else 0)
+PYCHK
+if [[ $? -eq 0 ]]; then pass "quy ước lifecycle và danh sách tool"; else FAIL=1; fi
+
 # --- 9. Không có secret bị lộ trong git -------------------------------------
 echo; echo "9) Quét secret bị commit"
 if grep -rInE '(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{30,}|xox[bap]-[0-9]{10,})' \

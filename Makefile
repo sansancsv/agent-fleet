@@ -60,7 +60,16 @@ test:  ## Chạy test của bộ điều phối
 # --- Vận hành ---------------------------------------------------------------
 .PHONY: capability
 capability:  ## Sinh lại các CLI từ MCP server sau khi sửa mcporter.json
-	$(COMPOSE) exec -T mcporter /fleet/capability-plane/generate-clis.sh
+	$(COMPOSE) exec -T mcporter bash /fleet/capability-plane/generate-clis.sh
+
+.PHONY: tools
+tools:  ## Xem TÊN TOOL CHÍNH XÁC của một server (dùng: make tools S=github)
+	@test -n "$(S)" || { echo "Thiếu S=<tên server>"; exit 64; }
+	$(COMPOSE) exec -T mcporter mcporter list $(S)
+
+.PHONY: mcp-status
+mcp-status:  ## Trạng thái kết nối của mọi MCP server
+	$(COMPOSE) exec -T mcporter mcporter list
 
 .PHONY: agents
 agents:  ## Xem đội hình agent và luật định tuyến

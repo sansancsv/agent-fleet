@@ -42,22 +42,54 @@ make logs S=openclaw-gateway
 | `bind: address in use` | cổng 18789 đã bị chiếm | đổi `OPENCLAW_GATEWAY_PORT` |
 | `auth token missing` | thiếu biến trong `.env` | `openssl rand -hex 32` rồi điền |
 
-### `mcporter` không khởi động: `Unknown daemon subcommand`
+### `mcporter` không khởi động
 
-Lệnh phơi cầu nối là **`mcporter serve --http <port>`**, không phải
-`mcporter daemon --bridge`. `mcporter daemon` chỉ có `start`/`stop`/`restart`/`status`.
+Bốn nguyên nhân, xếp theo tần suất gặp. Cả bốn đều bị `./scripts/validate.sh`
+bắt trước khi container chạy — nếu bạn gặp ở runtime nghĩa là đã bỏ qua bước đó.
 
-`mcporter serve` **không có xác thực** và mặc định chỉ nghe `127.0.0.1`. Vì vậy
-`bridge-up.sh` dò `--help` lúc chạy: nếu bản đã cài có cờ đổi địa chỉ nghe thì
-dùng trực tiếp, nếu không thì chạy trên loopback và dùng `socat` chuyển tiếp ra
-network của container. Bảo vệ nằm ở tầng mạng — Docker không map cổng này ra
-host, K8s dùng NetworkPolicy. Đừng phơi nó ra ngoài cụm.
+**1. `Unknown daemon subcommand`** — lệnh phơi cầu nối là `mcporter serve --http <port>`.
+`mcporter daemon` chỉ có `start` / `stop` / `restart` / `status`, và nó **không nhận
+`--config`** (luôn đọc `~/.mcporter/mcporter.json`).
+
+**2. `expected object, received string` tại `mcpServers.//--- ... ---`**
+Mỗi khoá trong `mcpServers` phải trỏ tới một object. Khoá chú thích kiểu
+`"//--- nhóm ---": ""` chỉ dùng được ở **cấp gốc**, không dùng được bên trong
+`mcpServers`.
+
+**3. `Invalid input` tại `<server>.lifecycle`**
+`lifecycle` là `"keep-alive"` | `"ephemeral"` | `{ mode, idleTimeoutMs }`.
+Viết `{ idleTimeoutMs: 600000 }` mà thiếu `mode` sẽ hỏng.
+
+**4. `unresolved env placeholder`**
+Một `${VAR}` chưa đặt làm **hỏng toàn bộ** việc nạp cấu hình, không chỉ server
+thiếu biến đó — nghĩa là thiếu một token Grafana cũng đủ để cả cầu nối không lên.
+Luôn viết `${VAR:-giá-trị-mặc-định}`. Khi làm đúng, server thiếu credential chỉ
+hiện là `offline` hoặc `auth required`, phần còn lại vẫn chạy.
+
+### Ba hành vi của mcporter dễ mất thời gian nếu không biết trước
+
+**`serve` chỉ phơi server `keep-alive`.** Đặt `lifecycle: ephemeral` nghĩa là
+server đó vô hình với cầu nối, dù `mcporter list` vẫn thấy. Kiểm tra bằng
+`make mcp-status` và `mcporter daemon status`.
+
+**`allowedTools` / `blockedTools` là tên tool CHÍNH XÁC, không phải glob.**
+`"*_delete_*"` không khớp gì cả — nó im lặng vô hiệu, và bạn tưởng đã chặn.
+Quy trình đúng là hai bước: khai báo server → `make tools S=<server>` để xem tên
+thật → chép vào `allowedTools`. Không được khai báo cả hai danh sách trên cùng
+một server.
+
+**`mcporter call` dùng `key=value`, không có `--arg`.**
+```bash
+mcporter call github.search_code q="rate limit" --output json
+mcporter call notion.notion-create-pages parentPageId=abc content=@/tmp/body.md
+```
+`key=@path` đọc giá trị từ tệp — dùng cho nội dung dài để khỏi thoát chuỗi trong shell.
 
 ### Agent trả lời "không có tool đó"
 ```bash
-docker compose exec mcporter mcporter list          # server có kết nối được không
-docker compose exec mcporter mcporter list github   # tool có trong allowedTools không
-make capability                                     # sinh lại CLI sau khi sửa cấu hình
+make mcp-status               # server nào kết nối được, server nào offline
+make tools S=github           # tên tool CHÍNH XÁC mà server đó phơi ra
+make capability               # sinh lại CLI sau khi sửa cấu hình
 ```
 Nguyên nhân hay gặp nhất: tool bị lọc bởi `allowedTools`, hoặc bị chặn bởi
 `blockedTools` ở tầng gateway (`config.d/mcp.json`).

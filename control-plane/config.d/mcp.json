@@ -21,12 +21,12 @@
       "mcporter-bridge": {
         type: "http",
         url: "${MCPORTER_BRIDGE_URL:-http://mcporter.fleet.svc.cluster.local:7420/mcp}",
-        // Lọc lần 2 ở tầng gateway (phòng thủ nhiều lớp - defense in depth).
-        blockedTools: [
-          "*_delete_*",
-          "*_drop_*",
-          "admin_*",
-        ],
+        // Lọc CHÍNH nằm ở mcporter (allowedTools, tên tool chính xác) — xem
+        // capability-plane/mcporter.json. Ở đây chỉ liệt kê thêm những tool
+        // muốn chặn lần hai, bằng TÊN CHÍNH XÁC như cầu nối phơi ra
+        // (dạng <server>__<tool>). Mẫu glob KHÔNG được hỗ trợ ở đâu cả —
+        // xem tên thật bằng: make tools S=<server>
+        blockedTools: [],
       },
     },
 
