@@ -72,6 +72,23 @@ tools:  ## Xem TÊN TOOL CHÍNH XÁC của một server (dùng: make tools S=git
 mcp-status:  ## Trạng thái kết nối của mọi MCP server
 	$(COMPOSE) exec -T mcporter mcporter list
 
+.PHONY: enable-slack
+enable-slack:  ## Chấp thuận quyền cho plugin Slack (một lần, lưu vào state)
+	$(COMPOSE) exec -T openclaw-gateway openclaw plugins enable slack --accept-capabilities
+	@echo
+	@echo "Xong. Giờ đổi channels.slack.enabled thành true trong"
+	@echo "control-plane/config.d/channels.json rồi chạy: make restart-gateway"
+
+.PHONY: restart-gateway
+restart-gateway: oc-validate  ## Nạp lại gateway sau khi sửa cấu hình
+	$(COMPOSE) restart openclaw-gateway
+	@bash ./scripts/health.sh
+
+.PHONY: plugins
+plugins:  ## Xem plugin nào đã nạp và plugin nào đang lỗi
+	$(COMPOSE) exec -T openclaw-gateway openclaw plugins list
+	$(COMPOSE) exec -T openclaw-gateway openclaw plugins doctor
+
 .PHONY: agents
 agents:  ## Xem đội hình agent và luật định tuyến
 	$(COMPOSE) exec -T openclaw-gateway openclaw agents list --tree

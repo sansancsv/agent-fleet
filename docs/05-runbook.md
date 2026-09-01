@@ -96,6 +96,38 @@ mcporter call notion.notion-create-pages parentPageId=abc content=@/tmp/body.md
 ```
 `key=@path` đọc giá trị từ tệp — dùng cho nội dung dài để khỏi thoát chuỗi trong shell.
 
+### Gateway "Up vài giây" lặp lại — plugin chưa được chấp thuận quyền
+
+```
+OpenClaw plugin verification failed; refusing to report the gateway ready.
+- Plugin "slack" requires capability consent.
+```
+
+Bật một kênh chat sẽ nạp plugin tương ứng, và plugin đòi **chấp thuận quyền một
+lần**. Chưa chấp thuận thì gateway từ chối báo sẵn sàng — cả fleet đứng im chỉ vì
+một kênh bạn còn chưa có token. Vì vậy repo này để `channels.slack.enabled: false`
+mặc định.
+
+Bật Slack theo ba bước:
+
+```bash
+# 1. điền SLACK_BOT_TOKEN_* và SLACK_APP_TOKEN_* vào .env
+make enable-slack          # 2. chấp thuận quyền (lưu vào state, một lần)
+# 3. đổi channels.slack.enabled thành true
+make restart-gateway
+```
+
+Xem plugin nào đang lỗi: `make plugins`.
+
+**Chấp thuận quyền lưu ở `~/.openclaw/state/openclaw.sqlite`** — cùng chỗ với
+lịch sử phiên và ghép đôi kênh. Compose gắn volume `openclaw-state` đúng vào thư
+mục đó; nếu gắn sai chỗ thì mỗi lần tạo lại container là phải chấp thuận lại và
+ghép đôi kênh lại từ đầu.
+
+Một mẹo đọc trạng thái: container hiện `Up 7 seconds` mỗi lần bạn nhìn không phải
+đang khởi động — nó **đang khởi động lại liên tục**. `make health` nay tự in 25
+dòng log cuối của dịch vụ hỏng để khỏi phải đoán.
+
 ### `openclaw config validate` báo `Invalid input` cụt lủn
 
 Khi thông báo chỉ nói `logging: Invalid input` mà không nói khoá nào sai, gần

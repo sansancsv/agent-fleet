@@ -19,7 +19,18 @@
     },
 
     slack: {
-      enabled: true,
+      // TẮT MẶC ĐỊNH — và đây là chủ đích, không phải quên bật.
+      //
+      // Bật kênh Slack sẽ nạp plugin "slack", mà plugin đó đòi chấp thuận quyền
+      // (capability consent) một lần. Chưa chấp thuận thì gateway KHÔNG báo sẵn
+      // sàng — nghĩa là cả fleet đứng im chỉ vì một kênh chat bạn còn chưa có
+      // token. Vì vậy mặc định là tắt.
+      //
+      // Khi đã có token Slack, bật theo đúng ba bước:
+      //   1. Điền SLACK_*_TOKEN vào .env
+      //   2. make enable-slack        (chấp thuận quyền, lưu vào state — một lần)
+      //   3. đổi dòng dưới thành true, rồi: make restart-gateway
+      enabled: false,
       dmPolicy: "allowlist",
       groupPolicy: "allowlist",
       requireMention: true,

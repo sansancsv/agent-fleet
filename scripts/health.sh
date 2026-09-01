@@ -62,10 +62,20 @@ echo "Trạng thái container:"
 
 if (( FAIL )); then
   echo
-  echo "${C_ERR}Có dịch vụ chưa lên.${C_OFF} Xem log của dịch vụ đó:"
-  echo "  make logs S=openclaw-gateway"
-  echo "  make logs S=langgraph"
-  echo "  make logs S=n8n"
+  echo "${C_ERR}Có dịch vụ chưa lên.${C_OFF}"
+  # In luôn log của dịch vụ hỏng thay vì bắt người dùng chạy thêm một lệnh nữa.
+  # Đặc biệt hữu ích khi container đang RESTART LOOP: nó luôn hiện "Up 7 seconds"
+  # nên nhìn `ps` sẽ tưởng đang khởi động bình thường.
+  for svc in openclaw-gateway langgraph n8n mcporter; do
+    state=$("${COMPOSE[@]}" ps --format '{{.Service}} {{.Status}}' 2>/dev/null | awk -v s="$svc" '$1==s{$1="";print}')
+    [[ "$state" == *"healthy"* ]] && continue
+    echo
+    echo "${C_DIM}── $svc —$state ──${C_OFF}"
+    "${COMPOSE[@]}" logs --tail 25 --no-log-prefix "$svc" 2>/dev/null | sed 's/^/  /'
+  done
+  echo
+  echo "Mẹo đọc: container 'Up vài giây' lặp đi lặp lại = đang khởi động lại liên tục,"
+  echo "không phải đang khởi động. Nguyên nhân nằm ở những dòng cuối log trên."
   exit 1
 fi
 echo
