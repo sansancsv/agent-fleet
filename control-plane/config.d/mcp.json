@@ -15,10 +15,12 @@
   mcp: {
     servers: {
       // Cầu nối duy nhất tới toàn bộ MCP server đã cấu hình trong mcporter.
+      // `mcporter serve` KHÔNG có xác thực — bảo vệ nằm ở tầng mạng:
+      // Docker không map cổng ra host; K8s dùng NetworkPolicy (deploy/k8s/20-*).
+      // Tên tool ở điểm cuối gộp có tiền tố server: <server>__<tool>.
       "mcporter-bridge": {
         type: "http",
         url: "${MCPORTER_BRIDGE_URL:-http://mcporter.fleet.svc.cluster.local:7420/mcp}",
-        headers: { Authorization: "Bearer ${MCPORTER_BRIDGE_TOKEN}" },
         // Lọc lần 2 ở tầng gateway (phòng thủ nhiều lớp - defense in depth).
         blockedTools: [
           "*_delete_*",

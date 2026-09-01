@@ -20,6 +20,18 @@ toàn cục → tạo `.env` với khoá nội bộ sinh ngẫu nhiên (`openssl
 Chạy lại nhiều lần được: mỗi bước tự kiểm tra trước khi làm, và **không ghi đè
 `.env` đã có**.
 
+### 2b. Đối chiếu CLI thật
+
+```bash
+./scripts/preflight.sh
+```
+
+`acpx`, `mcporter`, `openclaw` và `clawhub` đang phát hành rất nhanh. Một cờ có
+trong tài liệu hôm nay có thể chưa có, hoặc đã đổi tên, trong bản bạn vừa cài.
+Script này dò `--help` của bản **thật** trên máy bạn và báo ngay chỗ lệch — thay
+vì để bạn phát hiện lúc container đã chạy. Nó cũng cảnh báo nếu repo đang nằm
+trên ổ Windows trong WSL.
+
 ### 3. Điền khoá nhà cung cấp model
 ```bash
 $EDITOR .env

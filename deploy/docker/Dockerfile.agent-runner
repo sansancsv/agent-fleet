@@ -15,6 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl git openssh-client jq ripgrep less \
       python3 python3-venv build-essential \
+      socat netcat-openbsd \
  && curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq \
  && chmod +x /usr/local/bin/yq \
  && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -47,7 +48,9 @@ COPY --chown=node:node execution-plane /fleet/execution-plane
 COPY --chown=node:node capability-plane /fleet/capability-plane
 COPY --chown=node:node profiles /fleet/profiles
 
-RUN mkdir -p /srv/repos /var/log/fleet /home/node/.acpx /home/node/.mcporter \
+# Đặt lại bit thực thi: khi repo nằm trên ổ Windows (WSL /mnt/c) quyền không được giữ.
+RUN find /fleet -name '*.sh' -exec chmod +x {} + \
+ && mkdir -p /srv/repos /var/log/fleet /home/node/.acpx /home/node/.mcporter \
  && chown -R node:node /srv/repos /var/log/fleet /home/node
 
 USER node

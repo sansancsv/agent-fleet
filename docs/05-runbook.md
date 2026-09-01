@@ -42,6 +42,17 @@ make logs S=openclaw-gateway
 | `bind: address in use` | cổng 18789 đã bị chiếm | đổi `OPENCLAW_GATEWAY_PORT` |
 | `auth token missing` | thiếu biến trong `.env` | `openssl rand -hex 32` rồi điền |
 
+### `mcporter` không khởi động: `Unknown daemon subcommand`
+
+Lệnh phơi cầu nối là **`mcporter serve --http <port>`**, không phải
+`mcporter daemon --bridge`. `mcporter daemon` chỉ có `start`/`stop`/`restart`/`status`.
+
+`mcporter serve` **không có xác thực** và mặc định chỉ nghe `127.0.0.1`. Vì vậy
+`bridge-up.sh` dò `--help` lúc chạy: nếu bản đã cài có cờ đổi địa chỉ nghe thì
+dùng trực tiếp, nếu không thì chạy trên loopback và dùng `socat` chuyển tiếp ra
+network của container. Bảo vệ nằm ở tầng mạng — Docker không map cổng này ra
+host, K8s dùng NetworkPolicy. Đừng phơi nó ra ngoài cụm.
+
 ### Agent trả lời "không có tool đó"
 ```bash
 docker compose exec mcporter mcporter list          # server có kết nối được không

@@ -33,6 +33,10 @@ logs:  ## Theo dõi log (dùng: make logs S=openclaw-gateway)
 	$(COMPOSE) logs -f $(S)
 
 # --- Kiểm chứng -------------------------------------------------------------
+.PHONY: preflight
+preflight:  ## Đối chiếu CLI thật đã cài với những gì repo giả định
+	./scripts/preflight.sh
+
 .PHONY: validate
 validate:  ## Kiểm tra cú pháp và tính nhất quán của mọi cấu hình
 	./scripts/validate.sh
@@ -40,7 +44,7 @@ validate:  ## Kiểm tra cú pháp và tính nhất quán của mọi cấu hìn
 .PHONY: health
 health:  ## Kiểm tra sức khoẻ các dịch vụ
 	@echo "— OpenClaw gateway:"; curl -fsS http://127.0.0.1:$${OPENCLAW_GATEWAY_PORT:-18789}/healthz && echo " OK" || echo " LỖI"
-	@echo "— mcporter bridge:"; $(COMPOSE) exec -T mcporter wget -qO- http://127.0.0.1:7420/healthz && echo " OK" || echo " LỖI"
+	@echo "— mcporter bridge:"; $(COMPOSE) exec -T mcporter nc -z 127.0.0.1 7420 && echo " OK" || echo " LỖI"
 	@echo "— LangGraph:"; curl -fsS http://127.0.0.1:$${LANGGRAPH_PORT:-2024}/ok && echo " OK" || echo " LỖI"
 	@echo "— n8n:"; curl -fsS http://127.0.0.1:$${N8N_PORT:-5678}/healthz && echo " OK" || echo " LỖI"
 

@@ -99,11 +99,12 @@ export default defineFlow({
     publish: action({
       run: async (_i, ctx, prev) => {
         const dest = prev.loadProfile.output;
+        // Cú pháp mcporter: `mcporter call <server>.<tool>` với tham số qua --arg.
+        // Truyền nội dung qua tệp (key=@path) để không phải thoát chuỗi trong shell.
+        const payloadPath = `/tmp/fleet-publish-${Date.now()}.json`;
+        await ctx.writeFile(payloadPath, JSON.stringify({ ...dest.params, content: prev.draft.text }));
         const out = await ctx.exec(
-          `mcporter call ${dest.server} ${dest.tool} --json '${JSON.stringify({
-            ...dest.params,
-            content: prev.draft.text,
-          }).replace(/'/g, "'\\''")}'`,
+          `mcporter call ${dest.server}.${dest.tool} --arg payload=@${payloadPath} --output json`,
         );
         return { published: true, result: out.stdout };
       },

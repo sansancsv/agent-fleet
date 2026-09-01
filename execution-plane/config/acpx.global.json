@@ -51,10 +51,10 @@
   "mcpServers": [
     {
       "//": "Chỉ MỘT cầu nối duy nhất tới mcporter — xem capability-plane/.",
+      "//1": "mcporter serve không có auth; cách ly ở tầng mạng, không phải header.",
       "name": "mcporter-bridge",
       "type": "http",
-      "url": "${MCPORTER_BRIDGE_URL}",
-      "headers": { "Authorization": "Bearer ${MCPORTER_BRIDGE_TOKEN}" }
+      "url": "${MCPORTER_BRIDGE_URL}"
     }
   ],
 

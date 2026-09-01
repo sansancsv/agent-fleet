@@ -73,6 +73,7 @@ cùng một loại lỗi. `scripts/validate.sh` cưỡng chế quy tắc này.
 git clone <repo> agent-fleet && cd agent-fleet
 
 ./bootstrap.sh          # kiểm tra tiên quyết, cài công cụ, sinh khoá nội bộ
+./scripts/preflight.sh  # đối chiếu CLI thật đã cài với những gì repo giả định
 $EDITOR .env            # điền ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
 
 make up                 # khởi động 7 dịch vụ
@@ -157,3 +158,20 @@ Chi tiết: `docs/03-mo-rong-phong-ban.md`.
 
 Node 24+ · Python 3.12+ · Docker Engine + Compose v2 · git · jq · yq
 (tuỳ chọn: `gh`, `opa`, `kubectl` cho triển khai Kubernetes)
+
+### Dùng WSL trên Windows
+
+Đặt repo trên **filesystem Linux** (`~/agent-fleet`), không phải trên ổ Windows
+(`/mnt/c/...`). Hai lý do thực tế, không phải lý thuyết:
+
+1. `chmod` không bám trên `/mnt/c` nếu chưa bật `metadata` — script mất bit thực
+   thi, và `.env` không giữ được quyền `600`.
+2. I/O qua `/mnt/c` chậm hơn nhiều lần; `docker build` và `npm install` sẽ rất ì.
+
+```bash
+cp -r /mnt/c/Users/<bạn>/agent-fleet ~/agent-fleet
+cd ~/agent-fleet && find . -name '*.sh' -exec chmod +x {} +
+```
+
+Compose trong repo đã gọi script qua `bash <đường-dẫn>` thay vì chạy trực tiếp,
+nên vẫn hoạt động cả khi bit `+x` bị mất — nhưng hai vấn đề trên vẫn còn.

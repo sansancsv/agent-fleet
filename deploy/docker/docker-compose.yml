@@ -66,12 +66,13 @@ services:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.agent-runner
     restart: unless-stopped
-    command: ["/fleet/capability-plane/bridge-up.sh"]
+    # Gọi qua bash thay vì chạy trực tiếp: bit thực thi (+x) hay bị mất khi
+    # repo nằm trên ổ Windows (/mnt/c) trong WSL.
+    command: ["bash", "/fleet/capability-plane/bridge-up.sh"]
     environment:
       <<: *common-env
       MCPORTER_BRIDGE_PORT: "7420"
       MCPORTER_BRIDGE_BIND: "0.0.0.0"
-      MCPORTER_BRIDGE_TOKEN: ${MCPORTER_BRIDGE_TOKEN:?bắt buộc}
       GITHUB_MCP_TOKEN: ${GITHUB_MCP_TOKEN:-}
       GRAFANA_MCP_URL: ${GRAFANA_MCP_URL:-}
       GRAFANA_SA_TOKEN: ${GRAFANA_SA_TOKEN:-}
@@ -80,14 +81,16 @@ services:
       HUBSPOT_CLIENT_SECRET: ${HUBSPOT_CLIENT_SECRET:-}
     volumes:
       - ../../capability-plane/mcporter.json:/home/node/.mcporter/mcporter.json:ro
+      - ../../capability-plane:/fleet/capability-plane:ro
       - mcporter-cred:/home/node/.local/share/mcporter
       - fleet-logs:/var/log/fleet
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7420/healthz || exit 1"]
+      # mcporter serve không có endpoint /healthz — kiểm tra bằng cổng TCP.
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 7420 || exit 1"]
       interval: 20s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 40s
     logging: *logging
 
   # ---------------------------------------------------------------------------
@@ -104,7 +107,6 @@ services:
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?bắt buộc}
       OPENCLAW_SANDBOX: "1"
       MCPORTER_BRIDGE_URL: http://mcporter:7420/mcp
-      MCPORTER_BRIDGE_TOKEN: ${MCPORTER_BRIDGE_TOKEN}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -147,7 +149,6 @@ services:
     environment:
       <<: *common-env
       MCPORTER_BRIDGE_URL: http://mcporter:7420/mcp
-      MCPORTER_BRIDGE_TOKEN: ${MCPORTER_BRIDGE_TOKEN}
       ACPX_AUTH_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ACPX_AUTH_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ACPX_AUTH_GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -184,7 +185,6 @@ services:
       FLEET_CHECKPOINT_DSN: postgresql://${PG_USER:-fleet}:${PG_PASSWORD}@postgres:5432/fleet_checkpoints
       FLEET_REPO_ROOT: /srv/repos
       MCPORTER_BRIDGE_URL: http://mcporter:7420/mcp
-      MCPORTER_BRIDGE_TOKEN: ${MCPORTER_BRIDGE_TOKEN}
       ACPX_AUTH_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ACPX_AUTH_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ACPX_AUTH_GEMINI_API_KEY: ${GEMINI_API_KEY:-}
