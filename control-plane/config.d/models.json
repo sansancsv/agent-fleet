@@ -41,7 +41,8 @@
         // Dùng cho dữ liệu không được rời hạ tầng công ty (HR, pháp chế, tài chính).
         "openai-compatible/qwen3-coder-local": {
           alias: "Local",
-          baseUrl: "${LOCAL_LLM_BASE_URL:-http://vllm.fleet.svc.cluster.local:8000/v1}",
+          // Giá trị viết thẳng: cấu hình không thay thế ${BIẾN} ngoài khối `mcp`.
+          baseUrl: "http://vllm:8000/v1",
           apiKey: { source: "env", id: "LOCAL_LLM_API_KEY" },
           params: { temperature: 0.1 },
         },

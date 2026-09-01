@@ -77,14 +77,48 @@ case "$BIND_VAL" in
   loopback|lan|tailnet|auto|custom) pass "gateway.bind mặc định = '$BIND_VAL'" ;;
   *) fail "gateway.bind = '$BIND_VAL' không hợp lệ. Chỉ nhận: loopback | lan | tailnet | auto | custom (KHÔNG phải địa chỉ IP)" ;;
 esac
-CBIND=$(grep -oE '"?OPENCLAW_GATEWAY_BIND"?[: ]+"[^"]*"' deploy/docker/docker-compose.yml | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
-if [[ -n "$CBIND" ]]; then
-  case "$CBIND" in
-    lan|auto) pass "compose đặt OPENCLAW_GATEWAY_BIND='$CBIND' (container khác gọi tới được)" ;;
-    loopback) fail "compose đặt bind=loopback — container khác sẽ KHÔNG gọi tới gateway được" ;;
-    tailnet|custom) pass "compose đặt bind='$CBIND' (kiểm tra lại customBindHost nếu dùng custom)" ;;
-    *) fail "OPENCLAW_GATEWAY_BIND='$CBIND' không hợp lệ" ;;
-  esac
+# Trong bản Docker, bind phải cho phép container khác gọi tới.
+case "$BIND_VAL" in
+  lan|auto|tailnet|custom) pass "bind='$BIND_VAL' — container khác gọi tới gateway được" ;;
+  loopback) fail "bind=loopback: gateway chỉ nghe 127.0.0.1 BÊN TRONG container, n8n/langgraph sẽ không gọi tới được. Dùng 'lan'." ;;
+esac
+if grep -q 'OPENCLAW_GATEWAY_BIND' deploy/docker/docker-compose.yml 2>/dev/null \
+   && ! grep -q '# LƯU Ý: gateway.bind KHÔNG đọc từ biến môi trường' deploy/docker/docker-compose.yml; then
+  fail "compose vẫn đặt OPENCLAW_GATEWAY_BIND — biến này KHÔNG có tác dụng; bind chỉ đọc từ openclaw.json"
+fi
+
+# --- 6c. OpenClaw KHÔNG thay thế ${BIẾN} (trừ khối `mcp`) ------------------
+# Đây là lớp lỗi đắt nhất đã gặp: cấu hình đúng cú pháp JSON, gateway vẫn chết,
+# và thông báo lỗi không hề nhắc tới biến môi trường.
+#   • ngoài khối `mcp`: giá trị bị đọc NGUYÊN VĂN → "${X}" thành chuỗi "${X}"
+#   • trong khối `mcp`: có thay thế ${X}, nhưng KHÔNG có ${X:-mặc-định}
+echo; echo "6c) OpenClaw — không dùng \${BIẾN} sai chỗ"
+OC_BAD=0
+for f in control-plane/openclaw.json control-plane/config.d/*.json; do
+  # Chỉ bỏ dòng chú thích NGUYÊN DÒNG. Không dùng 's|//.*||' vì nó sẽ cắt luôn
+  # phần sau "https://" và làm lọt mất lỗi trong các URL.
+  HITS=$(sed 's|^[[:space:]]*//.*$||' "$f" | grep -oE '\$\{[^}]*\}' | sort -u || true)
+  [[ -z "$HITS" ]] && continue
+  if [[ "$(basename "$f")" == "mcp.json" ]]; then
+    while IFS= read -r h; do
+      [[ -z "$h" ]] && continue
+      if [[ "$h" == *":-"* ]]; then
+        fail "$f: '$h' — khối mcp không hỗ trợ cú pháp \${BIẾN:-mặc-định}"; OC_BAD=1
+      fi
+    done <<< "$HITS"
+  else
+    fail "$f: cấu hình ngoài khối mcp bị đọc nguyên văn, bỏ \${BIẾN} đi:"
+    echo "$HITS" | sed 's/^/     /'; OC_BAD=1
+  fi
+done
+(( OC_BAD )) || pass "không có \${BIẾN} sai chỗ trong cấu hình OpenClaw"
+
+# `env.vars` viết literal sẽ GHI ĐÈ khoá API thật mà Docker tiêm vào.
+if python3 scripts/json5_to_json.py control-plane/openclaw.json \
+   | python3 -c "import json,sys; sys.exit(0 if (json.load(sys.stdin).get('env') or {}).get('vars') else 1)" 2>/dev/null; then
+  fail "openclaw.json khai báo env.vars — nó ghi thẳng ra biến môi trường và sẽ ghi đè khoá API do Docker tiêm vào. Bỏ khối này đi."
+else
+  pass "không khai báo env.vars (khoá API đến từ Docker/K8s)"
 fi
 
 # --- 7. NHẤT QUÁN: hồ sơ phòng ban trỏ tới gói năng lực có thật -------------

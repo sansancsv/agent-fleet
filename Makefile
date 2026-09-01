@@ -42,11 +42,8 @@ validate:  ## Kiểm tra cú pháp và tính nhất quán của mọi cấu hìn
 	./scripts/validate.sh
 
 .PHONY: health
-health:  ## Kiểm tra sức khoẻ các dịch vụ
-	@echo "— OpenClaw gateway:"; curl -fsS http://127.0.0.1:$${OPENCLAW_GATEWAY_PORT:-18789}/healthz && echo " OK" || echo " LỖI"
-	@echo "— mcporter bridge:"; $(COMPOSE) exec -T mcporter nc -z 127.0.0.1 7420 && echo " OK" || echo " LỖI"
-	@echo "— LangGraph:"; curl -fsS http://127.0.0.1:$${LANGGRAPH_PORT:-2024}/ok && echo " OK" || echo " LỖI"
-	@echo "— n8n:"; curl -fsS http://127.0.0.1:$${N8N_PORT:-5678}/healthz && echo " OK" || echo " LỖI"
+health:  ## Chờ và kiểm tra sức khoẻ các dịch vụ (có retry — không báo lỗi giả)
+	@./scripts/health.sh
 
 .PHONY: audit
 audit:  ## Chạy rà soát bảo mật của OpenClaw + test chính sách OPA

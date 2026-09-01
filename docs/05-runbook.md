@@ -32,6 +32,17 @@ thật. Nếu hầu hết mục chỉ 1/3, tiêu chí thẩm định đang quá 
 
 ## Sự cố thường gặp
 
+### `make health` báo "Connection reset by peer" ngay sau `make up`
+
+Gần như luôn là **kiểm tra quá sớm**, không phải dịch vụ hỏng. `docker compose
+up -d` trả về khi container đã *khởi động*, không phải khi dịch vụ đã *sẵn
+sàng*: n8n mất 20–40 giây chạy migration lần đầu, LangGraph phải kết nối
+PostgreSQL và tạo bảng checkpoint.
+
+`make health` nay chờ và thử lại tới 180 giây mỗi dịch vụ, và in luôn bảng
+trạng thái container. Nếu vẫn đỏ sau ngần ấy thời gian thì mới là hỏng thật —
+xem `make logs S=<dịch-vụ>`.
+
 ### Gateway không khởi động
 ```bash
 make logs S=openclaw-gateway
@@ -87,13 +98,36 @@ mcporter call notion.notion-create-pages parentPageId=abc content=@/tmp/body.md
 
 ### Gateway báo `Invalid --bind`
 
-`gateway.bind` nhận **một trong năm giá trị**, không phải địa chỉ IP:
-`loopback` | `lan` | `tailnet` | `auto` | `custom`.
+Hai nguyên nhân, và nguyên nhân thứ hai là bẫy thật sự.
 
-Trong Docker phải là `lan` thì container khác mới gọi tới gateway được
-(`loopback` chỉ nghe 127.0.0.1 *bên trong* container). Muốn một IP cụ thể thì
-dùng `bind: "custom"` kèm `gateway.customBindHost`. Biến môi trường đúng tên là
-`OPENCLAW_GATEWAY_BIND`. `./scripts/validate.sh` nay kiểm giá trị này.
+**a. Sai giá trị.** `gateway.bind` nhận **một trong năm nhãn**, không phải địa
+chỉ IP: `loopback` | `lan` | `tailnet` | `auto` | `custom`. Trong Docker phải là
+`lan` (`loopback` chỉ nghe 127.0.0.1 *bên trong* container nên n8n và LangGraph
+không gọi tới được). Muốn một IP cụ thể: `bind: "custom"` +
+`gateway.customBindHost`.
+
+**b. Dùng `${BIẾN}` trong cấu hình.** Đây mới là bẫy: **OpenClaw KHÔNG thay thế
+biến môi trường trong `openclaw.json`.** Giá trị được đọc nguyên văn, nên
+`bind: "${OPENCLAW_GATEWAY_BIND:-loopback}"` bị hiểu là chuỗi `${OPENCLAW_...}`
+và báo đúng lỗi trên — không hề nhắc gì tới biến môi trường, nên rất dễ đi tìm
+sai chỗ.
+
+Ba quy tắc rút ra:
+
+| Nơi | `${BIẾN}` | Ghi chú |
+|---|---|---|
+| Khối `mcp` | **có** thay thế | nhưng KHÔNG hỗ trợ `${BIẾN:-mặc-định}` — cả cụm trong ngoặc bị coi là *tên* biến |
+| Mọi nơi khác | **không** | viết thẳng giá trị |
+| Secret | dùng `{ source: "env", id: "TÊN_BIẾN" }` | đây là cơ chế duy nhất được hỗ trợ |
+
+**Cạm bẫy nguy hiểm nhất của quy tắc này:** khai báo
+`env: { vars: { ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}" } }` sẽ đặt khoá API
+thành đúng chuỗi 22 ký tự đó, **ghi đè khoá thật** Docker đã tiêm vào — rồi mọi
+lệnh gọi model hỏng với lỗi xác thực chẳng liên quan gì. Vì vậy repo này không
+khai báo `env.vars`; khoá đến từ `environment:` của compose (hoặc Secret ở K8s).
+
+`./scripts/validate.sh` kiểm cả ba: giá trị `bind`, `${BIẾN}` đặt sai chỗ, và sự
+tồn tại của `env.vars`.
 
 ### LangGraph báo `executable file not found in $PATH`
 

@@ -103,10 +103,8 @@ services:
       mcporter: { condition: service_healthy }
     environment:
       <<: *common-env
-      # Giá trị hợp lệ: loopback | lan | tailnet | auto | custom — KHÔNG phải
-      # địa chỉ IP. Trong Docker phải là "lan" để container khác gọi tới được.
-      # (Muốn IP cụ thể thì bind=custom + gateway.customBindHost.)
-      OPENCLAW_GATEWAY_BIND: "lan"
+      # LƯU Ý: gateway.bind KHÔNG đọc từ biến môi trường — OpenClaw đọc cấu hình
+      # nguyên văn. Giá trị "lan" nằm thẳng trong control-plane/openclaw.json.
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?bắt buộc}
       OPENCLAW_SANDBOX: "1"
       MCPORTER_BRIDGE_URL: http://mcporter:7420/mcp
@@ -201,11 +199,11 @@ services:
       - ../../execution-plane/config/acpx.global.json:/root/.acpx/config.json:ro
       - fleet-logs:/var/log/fleet
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/ok || exit 1"]
-      interval: 20s
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/ok',timeout=3).status==200 else 1)\""]
+      interval: 10s
       timeout: 5s
-      retries: 6
-      start_period: 45s
+      retries: 12
+      start_period: 30s
     logging: *logging
 
   # ---------------------------------------------------------------------------
@@ -248,6 +246,14 @@ services:
     volumes:
       - n8ndata:/home/node/.n8n
       - ../../orchestration/n8n/workflows:/workflows:ro
+    healthcheck:
+      # n8n mất 20–40 giây để chạy migration lần đầu. Không có healthcheck thì
+      # `make health` chạy quá sớm và báo lỗi giả.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
     logging: *logging
 
   n8n-worker:

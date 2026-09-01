@@ -20,7 +20,12 @@
       // Tên tool ở điểm cuối gộp có tiền tố server: <server>__<tool>.
       "mcporter-bridge": {
         type: "http",
-        url: "${MCPORTER_BRIDGE_URL:-http://mcporter.fleet.svc.cluster.local:7420/mcp}",
+        // Khối `mcp` là NƠI DUY NHẤT trong cấu hình OpenClaw có thay thế ${BIẾN}
+        // — và nó KHÔNG hỗ trợ cú pháp ${BIẾN:-mặc-định}: cả cụm bên trong dấu
+        // ngoặc bị coi là TÊN biến, nên "${X:-y}" sẽ không bao giờ khớp.
+        // Ở đây dùng giá trị viết thẳng cho bản Docker; K8s thì sửa ConfigMap
+        // thành http://mcporter.fleet.svc.cluster.local:7420/mcp
+        url: "http://mcporter:7420/mcp",
         // Lọc CHÍNH nằm ở mcporter (allowedTools, tên tool chính xác) — xem
         // capability-plane/mcporter.json. Ở đây chỉ liệt kê thêm những tool
         // muốn chặn lần hai, bằng TÊN CHÍNH XÁC như cầu nối phơi ra
