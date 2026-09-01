@@ -8,6 +8,12 @@ dependencies = [
   "langgraph-checkpoint-postgres>=2.0",
   "psycopg[binary,pool]>=3.2",
   "pydantic>=2.9",
+  # Server của fleet. LƯU Ý: gói `langgraph` KHÔNG kèm lệnh `langgraph`
+  # (CLI nằm ở `langgraph-cli`), và `langgraph up` dựng Docker Compose nên
+  # không dùng được bên trong container. Ta tự phục vụ đồ thị bằng uvicorn.
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

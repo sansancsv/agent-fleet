@@ -103,7 +103,10 @@ services:
       mcporter: { condition: service_healthy }
     environment:
       <<: *common-env
-      OPENCLAW_BIND: "0.0.0.0"
+      # Giá trị hợp lệ: loopback | lan | tailnet | auto | custom — KHÔNG phải
+      # địa chỉ IP. Trong Docker phải là "lan" để container khác gọi tới được.
+      # (Muốn IP cụ thể thì bind=custom + gateway.customBindHost.)
+      OPENCLAW_GATEWAY_BIND: "lan"
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?bắt buộc}
       OPENCLAW_SANDBOX: "1"
       MCPORTER_BRIDGE_URL: http://mcporter:7420/mcp
@@ -184,6 +187,7 @@ services:
       <<: *common-env
       FLEET_CHECKPOINT_DSN: postgresql://${PG_USER:-fleet}:${PG_PASSWORD}@postgres:5432/fleet_checkpoints
       FLEET_REPO_ROOT: /srv/repos
+      FLEET_PROFILES_DIR: /fleet/profiles
       MCPORTER_BRIDGE_URL: http://mcporter:7420/mcp
       ACPX_AUTH_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ACPX_AUTH_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -193,6 +197,7 @@ services:
       - "127.0.0.1:${LANGGRAPH_PORT:-2024}:8000"
     volumes:
       - repos:/srv/repos
+      - ../../profiles:/fleet/profiles:ro
       - ../../execution-plane/config/acpx.global.json:/root/.acpx/config.json:ro
       - fleet-logs:/var/log/fleet
     healthcheck:

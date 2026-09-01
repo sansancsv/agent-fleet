@@ -85,6 +85,36 @@ mcporter call notion.notion-create-pages parentPageId=abc content=@/tmp/body.md
 ```
 `key=@path` đọc giá trị từ tệp — dùng cho nội dung dài để khỏi thoát chuỗi trong shell.
 
+### Gateway báo `Invalid --bind`
+
+`gateway.bind` nhận **một trong năm giá trị**, không phải địa chỉ IP:
+`loopback` | `lan` | `tailnet` | `auto` | `custom`.
+
+Trong Docker phải là `lan` thì container khác mới gọi tới gateway được
+(`loopback` chỉ nghe 127.0.0.1 *bên trong* container). Muốn một IP cụ thể thì
+dùng `bind: "custom"` kèm `gateway.customBindHost`. Biến môi trường đúng tên là
+`OPENCLAW_GATEWAY_BIND`. `./scripts/validate.sh` nay kiểm giá trị này.
+
+### LangGraph báo `executable file not found in $PATH`
+
+Gói `langgraph` (thư viện) **không kèm** lệnh `langgraph` — CLI nằm ở gói riêng
+`langgraph-cli`. Và kể cả cài đúng, `langgraph up` dựng Docker Compose nên chạy
+nó bên trong một container là sai tầng.
+
+Fleet này không dùng LangGraph Server. Nó phục vụ đồ thị bằng một FastAPI mỏng
+(`src/fleet/server.py`) chạy qua `uvicorn`, phơi đúng những endpoint mà n8n gọi:
+
+| Endpoint | Dùng để |
+|---|---|
+| `GET /ok` | healthcheck |
+| `GET /profiles/<tên>/authorize?requester=` | n8n kiểm quyền **trước khi** tiêu token |
+| `POST /runs/wait` | chạy tới khi xong hoặc tới điểm chờ người duyệt |
+| `POST /runs/<thread_id>/resume` | người duyệt trả lời → chạy tiếp đúng chỗ đã dừng |
+| `GET /runs/<thread_id>` | đọc trạng thái hiện tại |
+
+Nếu thiếu `FLEET_CHECKPOINT_DSN`, server vẫn chạy nhưng dùng bộ nhớ trong và in
+cảnh báo — quy trình sẽ mất khi container khởi động lại.
+
 ### Agent trả lời "không có tool đó"
 ```bash
 make mcp-status               # server nào kết nối được, server nào offline

@@ -68,6 +68,25 @@ else
   fail "vai trò LỆCH: openclaw=[$ROLES_OC] policy=[$ROLES_POLICY]"
 fi
 
+# --- 6b. OpenClaw: gateway.bind là ENUM, không phải địa chỉ IP --------------
+echo; echo "6b) OpenClaw — giá trị gateway.bind"
+BIND=$(python3 scripts/json5_to_json.py control-plane/openclaw.json \
+  | python3 -c "import json,sys; print((json.load(sys.stdin).get('gateway') or {}).get('bind',''))")
+BIND_VAL="${BIND#*:-}"; BIND_VAL="${BIND_VAL%\}}"
+case "$BIND_VAL" in
+  loopback|lan|tailnet|auto|custom) pass "gateway.bind mặc định = '$BIND_VAL'" ;;
+  *) fail "gateway.bind = '$BIND_VAL' không hợp lệ. Chỉ nhận: loopback | lan | tailnet | auto | custom (KHÔNG phải địa chỉ IP)" ;;
+esac
+CBIND=$(grep -oE '"?OPENCLAW_GATEWAY_BIND"?[: ]+"[^"]*"' deploy/docker/docker-compose.yml | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+if [[ -n "$CBIND" ]]; then
+  case "$CBIND" in
+    lan|auto) pass "compose đặt OPENCLAW_GATEWAY_BIND='$CBIND' (container khác gọi tới được)" ;;
+    loopback) fail "compose đặt bind=loopback — container khác sẽ KHÔNG gọi tới gateway được" ;;
+    tailnet|custom) pass "compose đặt bind='$CBIND' (kiểm tra lại customBindHost nếu dùng custom)" ;;
+    *) fail "OPENCLAW_GATEWAY_BIND='$CBIND' không hợp lệ" ;;
+  esac
+fi
+
 # --- 7. NHẤT QUÁN: hồ sơ phòng ban trỏ tới gói năng lực có thật -------------
 echo; echo "7) Hồ sơ phòng ban ↔ gói năng lực"
 for f in profiles/*.yaml; do

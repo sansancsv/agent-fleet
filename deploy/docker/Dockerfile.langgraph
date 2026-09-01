@@ -31,4 +31,6 @@ RUN pip install --upgrade pip && pip install .
 COPY langgraph.json ./
 
 EXPOSE 8000
-CMD ["langgraph", "up", "--host", "0.0.0.0", "--port", "8000"]
+# KHÔNG dùng `langgraph up`: lệnh đó thuộc gói `langgraph-cli` (không có trong
+# `langgraph`) và nó dựng Docker Compose — sai tầng khi đã ở trong container.
+CMD ["uvicorn", "fleet.server:app", "--host", "0.0.0.0", "--port", "8000"]

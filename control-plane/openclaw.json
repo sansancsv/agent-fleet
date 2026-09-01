@@ -15,10 +15,17 @@
 
   // --- Gateway: cổng vào duy nhất của toàn bộ fleet -------------------------
   gateway: {
-    // Trong Docker/K8s phải bind 0.0.0.0 để kube-proxy/ingress vào được,
-    // NHƯNG bắt buộc đi kèm auth token + NetworkPolicy (xem deploy/k8s).
-    bind: "${OPENCLAW_BIND:-loopback}",
+    mode: "local",
+    // `bind` nhận MỘT TRONG NĂM GIÁ TRỊ, không phải địa chỉ IP:
+    //   loopback (mặc định, chỉ 127.0.0.1) | lan | tailnet | auto | custom
+    // Trong Docker/K8s phải là "lan" thì container khác mới gọi tới được —
+    // và bắt buộc đi kèm auth token + NetworkPolicy (xem deploy/k8s).
+    // Muốn một IP cụ thể: bind: "custom" + gateway.customBindHost: "10.0.0.5".
+    bind: "${OPENCLAW_GATEWAY_BIND:-loopback}",
     port: 18789,
+    controlUi: {
+      allowedOrigins: ["http://localhost:18789", "http://127.0.0.1:18789"],
+    },
     auth: {
       mode: "token",
       token: { source: "env", id: "OPENCLAW_GATEWAY_TOKEN" },
