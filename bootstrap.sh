@@ -33,9 +33,14 @@ command -v gh  >/dev/null || warn "thiếu gh — không tự mở PR được"
 
 # --- 2. Công cụ fleet -------------------------------------------------------
 echo; echo "2) Cài công cụ fleet (toàn cục)"
+# LƯU Ý: hàm này KHÔNG nâng cấp thứ đã cài. Đó là chủ đích (không tự đụng vào
+# công cụ có sẵn của bạn), nhưng nó sinh ra một cái bẫy: CLI cũ trên host cộng
+# với image container mới = cấu hình "hợp lệ" ở chỗ này, "Invalid input" ở chỗ
+# kia. Vì vậy phiên bản luôn được in ra, và openclaw được đối chiếu với
+# OPENCLAW_TAG ở bước sau.
 install_npm () {
-  if command -v "$1" >/dev/null 2>&1; then ok "$1 đã có ($("$1" --version 2>/dev/null | head -1))"
-  else echo "   cài $2..."; npm install -g "$2" >/dev/null && ok "$1 đã cài"; fi
+  if command -v "$1" >/dev/null 2>&1; then ok "$1 đã có — $("$1" --version 2>/dev/null | head -1)"
+  else echo "   cài $2..."; npm install -g "$2" >/dev/null && ok "$1 đã cài — $("$1" --version 2>/dev/null | head -1)"; fi
 }
 install_npm acpx     acpx@latest
 install_npm mcporter mcporter@latest
@@ -56,6 +61,23 @@ else
   chmod 600 .env
   ok ".env đã tạo, khoá nội bộ sinh ngẫu nhiên"
   warn "CẦN LÀM: điền ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY và các token tích hợp"
+fi
+
+# --- 3b. Đối chiếu phiên bản openclaw trên host với image container ---------
+echo; echo "3b) Phiên bản OpenClaw"
+PINNED=$(grep -E '^OPENCLAW_TAG=' .env 2>/dev/null | cut -d= -f2- || true)
+PINNED=${PINNED:-2026.8.1}
+if command -v openclaw >/dev/null 2>&1; then
+  HOSTV=$(openclaw --version 2>/dev/null | head -1)
+  if grep -q "$PINNED" <<<"$HOSTV"; then
+    ok "host khớp image ($PINNED)"
+  else
+    warn "host chạy '$HOSTV' nhưng image ghim ở $PINNED."
+    echo "     Schema cấu hình khác nhau giữa các bản — chạy openclaw bằng tay sẽ"
+    echo "     cho kết quả không đại diện. Đồng bộ:"
+    echo "       npm install -g openclaw@$PINNED --allow-scripts=openclaw"
+    echo "     (make oc-validate luôn ưu tiên image nên vẫn kiểm đúng.)"
+  fi
 fi
 
 # --- 4. Quyền thư mục -------------------------------------------------------

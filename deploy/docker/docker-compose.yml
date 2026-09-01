@@ -97,7 +97,11 @@ services:
   # TẦNG ĐIỀU KHIỂN — OpenClaw Gateway
   # ---------------------------------------------------------------------------
   openclaw-gateway:
-    image: ghcr.io/openclaw/openclaw:${OPENCLAW_TAG:-latest}
+    # GHIM PHIÊN BẢN. Schema cấu hình của OpenClaw đổi giữa các bản; dùng
+    # ":latest" nghĩa là một hôm nào đó `docker compose pull` sẽ làm gateway
+    # từ chối cấu hình đang chạy tốt. Nâng bản có chủ đích: đổi OPENCLAW_TAG
+    # trong .env → `make oc-validate` → `make up`.
+    image: ghcr.io/openclaw/openclaw:${OPENCLAW_TAG:-2026.8.1}
     restart: unless-stopped
     depends_on:
       mcporter: { condition: service_healthy }

@@ -96,6 +96,36 @@ mcporter call notion.notion-create-pages parentPageId=abc content=@/tmp/body.md
 ```
 `key=@path` đọc giá trị từ tệp — dùng cho nội dung dài để khỏi thoát chuỗi trong shell.
 
+### `openclaw config validate` báo `Invalid input` cụt lủn
+
+Khi thông báo chỉ nói `logging: Invalid input` mà không nói khoá nào sai, gần
+như luôn là **lệch phiên bản**: CLI trên host là một bản, image container là bản
+khác, và schema cấu hình đã đổi giữa hai bản đó.
+
+```bash
+openclaw --version                                    # bản trên host
+docker compose -f deploy/docker/docker-compose.yml \
+  run --rm openclaw-gateway openclaw --version        # bản trong image
+```
+
+Vì sao dễ xảy ra: `bootstrap.sh` cố ý **không** nâng cấp công cụ đã có sẵn trên
+máy bạn, trong khi image thì được kéo về theo tag.
+
+Hai biện pháp đã đưa vào repo:
+
+- `OPENCLAW_TAG` được **ghim** trong `.env` (không dùng `latest`). Cấu hình
+  trong `control-plane/` được kiểm chứng với đúng bản đó. Nâng bản có chủ đích:
+  đổi tag → `make oc-validate` → `make up`.
+- `make oc-validate` **ưu tiên container** (đang chạy, hoặc một container tạm từ
+  image), chỉ dùng CLI host khi không có Docker — và khi đó có cảnh báo. Nó cũng
+  báo khi phiên bản host lệch với runtime.
+
+Đồng bộ CLI host cho khỏi nhầm lẫn về sau:
+
+```bash
+npm install -g openclaw@$(grep OPENCLAW_TAG .env | cut -d= -f2) --allow-scripts=openclaw
+```
+
 ### Gateway báo `Unrecognized keys` / `Invalid config`
 
 Schema của OpenClaw **nghiêm ngặt**: một khoá lạ là gateway từ chối khởi động.

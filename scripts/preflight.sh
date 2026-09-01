@@ -102,6 +102,24 @@ hdr "clawhub — tầng phân phối"
 check_sub clawhub skill
 check_sub clawhub login
 
+hdr "Lệch phiên bản giữa host và container"
+PINNED=$(grep -E '^OPENCLAW_TAG=' .env 2>/dev/null | cut -d= -f2- || true)
+PINNED=${PINNED:-2026.8.1}
+if have openclaw; then
+  HV=$(openclaw --version 2>/dev/null | head -1)
+  if grep -q "$PINNED" <<<"$HV"; then
+    ok "openclaw host khớp image đã ghim ($PINNED)"
+  else
+    bad "openclaw host = '$HV', image ghim = $PINNED"
+    cat <<'DRIFT'
+     Schema cấu hình đổi giữa các bản OpenClaw. Lệch phiên bản là nguồn của
+     những lỗi "Invalid input" cụt lủn khi bạn chạy openclaw bằng tay, trong
+     khi container lại chạy tốt (hoặc ngược lại). Đồng bộ:
+       npm install -g openclaw@<bản-đã-ghim> --allow-scripts=openclaw
+DRIFT
+  fi
+fi
+
 hdr "Môi trường"
 if grep -qi microsoft /proc/version 2>/dev/null; then
   echo "${C_WARN}!${C_OFF} Đang chạy trong WSL."
