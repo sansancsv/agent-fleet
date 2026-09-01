@@ -96,6 +96,28 @@ mcporter call notion.notion-create-pages parentPageId=abc content=@/tmp/body.md
 ```
 `key=@path` đọc giá trị từ tệp — dùng cho nội dung dài để khỏi thoát chuỗi trong shell.
 
+### Gateway báo `SecretProviderResolutionError`
+
+```
+Startup failed: required secrets are unavailable.
+SecretProviderResolutionError: Secret provider "local-llm" is not configured
+```
+
+Nguyên nhân: dùng **SecretRef object** `{ source, provider, id }`. Dạng này hợp
+lệ theo schema, nhưng `provider` phải là một secret provider đã đăng ký — và khối
+`secrets` trong cấu hình chỉ nói về egress proxy, không phải nơi đăng ký provider.
+
+Điều làm nó khó chịu: cấu hình **qua được cả `config validate` lẫn `security
+audit`**, rồi gateway chết lúc khởi động. Không phép kiểm tĩnh nào bắt được.
+
+Quy ước của repo này: **luôn dùng chuỗi `"${TÊN_BIẾN}"` cho credential**, không
+dùng SecretRef object. `./scripts/validate.sh` cưỡng chế điều đó.
+
+Bài học rộng hơn: **một tính năng tuỳ chọn chưa dựng không được phép chặn cả
+gateway.** Model tự host vì vậy mặc định tắt (xem `config.d/models.json`), giống
+như Slack. Bật lại chỉ khi thật sự có vLLM/TGI, rồi `make oc-validate` và
+`make up` để xác nhận.
+
 ### Gateway lặp lại `EPERM: chmod '/home/node/.openclaw/state'`
 
 Đây là cái bẫy kinh điển của **named volume gắn vào thư mục con**.

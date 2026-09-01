@@ -35,8 +35,29 @@ def is_credential(path: list[str]) -> bool:
     return any(any(c in part.lower() for c in CREDENTIAL_KEYS) for part in path)
 
 
+def is_secret_ref(node) -> bool:
+    return (
+        isinstance(node, dict)
+        and set(node) >= {"source", "id"}
+        and node.get("source") in ("env", "file", "exec", "store")
+    )
+
+
 def walk(node, path, problems, in_mcp=False):
     if isinstance(node, dict):
+        # SecretRef object { source, provider, id }: hợp lệ theo SCHEMA nhưng
+        # `provider` phải là một secret provider đã đăng ký — và khối `secrets`
+        # trong cấu hình chỉ nói về egress proxy, không phải nơi đăng ký provider.
+        # Hậu quả: cấu hình qua được `config validate` VÀ `security audit`, rồi
+        # gateway chết lúc khởi động:
+        #     SecretProviderResolutionError: Secret provider "x" is not configured
+        # Trong repo này quy ước dùng chuỗi "${BIẾN}" cho mọi credential.
+        if is_secret_ref(node):
+            problems.append(
+                f"{'.'.join(path)}: SecretRef {{source,provider,id}} — dùng chuỗi "
+                f'"${{{node.get("id")}}}" thay thế. SecretRef qua được mọi phép kiểm '
+                "tĩnh rồi làm gateway chết lúc khởi động nếu provider chưa đăng ký."
+            )
         for key, value in node.items():
             walk(value, [*path, str(key)], problems, in_mcp or key == "mcp")
     elif isinstance(node, list):

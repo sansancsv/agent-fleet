@@ -13,24 +13,33 @@
 //   3. Fallback để chống rate-limit/sự cố, KHÔNG phải để âm thầm hạ chất lượng.
 // =============================================================================
 {
-  // --- Nhà cung cấp tự host: dùng cho dữ liệu không được rời hạ tầng công ty --
-  models: {
-    providers: {
-      "local-llm": {
-        // `api` phải thuộc tập đóng: openai-completions | openai-responses |
-        // openai-chatgpt-responses | anthropic-messages | google-generative-ai |
-        // google-vertex | github-copilot | bedrock-converse-stream | ollama |
-        // azure-openai-responses.  vLLM/TGI dùng "openai-completions".
-        api: "openai-completions",
-        baseUrl: "http://vllm:8000/v1",
-        apiKey: { source: "env", provider: "local-llm", id: "LOCAL_LLM_API_KEY" },
-        // `models` là mảng OBJECT, không phải mảng chuỗi.
-        models: [
-          { id: "qwen3-coder-local", name: "Qwen3 Coder (tự host)" },
-        ],
-      },
-    },
-  },
+  // --- Model tự host (TUỲ CHỌN — mặc định TẮT) ------------------------------
+  //
+  // VÌ SAO KHÔNG BẬT SẴN: khai báo một provider có `apiKey` là SecretRef sẽ làm
+  // gateway CHẾT LÚC KHỞI ĐỘNG nếu secret không giải được:
+  //     Startup failed: required secrets are unavailable.
+  //     SecretProviderResolutionError: Secret provider "local-llm" is not configured
+  // Nói cách khác: một model tuỳ chọn mà bạn chưa dựng sẽ chặn cả fleet.
+  //
+  // `openclaw config validate` KHÔNG bắt được lỗi này (cấu hình vẫn đúng schema)
+  // — `openclaw security audit` mới bắt. Vì vậy `make oc-validate` nay chạy cả hai.
+  //
+  // KHI ĐÃ CÓ vLLM/TGI thật, thêm lại khối dưới đây rồi chạy `make oc-validate`:
+  //
+  // models: {
+  //   providers: {
+  //     "local-llm": {
+  //       api: "openai-completions",       // vLLM/TGI dùng giao thức này
+  //       baseUrl: "http://vllm:8000/v1",
+  //       apiKey: "${LOCAL_LLM_API_KEY}",  // chuỗi, KHÔNG phải SecretRef object
+  //       models: [ { id: "qwen3-coder-local", name: "Qwen3 Coder (tự host)" } ],
+  //     },
+  //   },
+  // },
+  //
+  // Dữ liệu mức `restricted` (tài chính, pháp chế) vẫn được bảo vệ ở tầng acpx:
+  // profiles/*.yaml ép chúng dùng backend `local-llm` khai trong acpx.global.json,
+  // độc lập với khối models của OpenClaw.
 
   // --- Bí danh dùng trong chat: "@architect dùng Opus phân tích..." ----------
   agents: {
@@ -55,10 +64,6 @@
         "google/gemini-3-pro": {
           alias: "Gemini",
           params: { temperature: 0.2 },
-        },
-        "local-llm/qwen3-coder-local": {
-          alias: "Local",
-          params: { temperature: 0.1 },
         },
       },
     },

@@ -83,6 +83,10 @@ echo "$OUT" | grep -v '^\[config\]' | sed 's/^/  /'
 
 if grep -q "Config valid" <<<"$OUT"; then
   echo
+  echo "${C_DIM}Lưu ý về giới hạn: 'config validate' chỉ kiểm SCHEMA. Lỗi giải secret${C_OFF}"
+  echo "${C_DIM}(SecretProviderResolutionError) chỉ lộ ra lúc gateway khởi động thật —${C_OFF}"
+  echo "${C_DIM}validate.sh chặn trước bằng cách cấm SecretRef object trong repo này.${C_OFF}"
+  echo
   echo "${C_OK}Cấu hình hợp lệ${C_OFF} ${C_DIM}(cảnh báo \"Missing env var\" là bình thường —"
   echo "biến được tiêm lúc chạy qua docker-compose)${C_OFF}"
 
