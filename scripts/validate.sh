@@ -195,6 +195,14 @@ sys.exit(1 if bad else 0)
 PYCHK
 if [[ $? -eq 0 ]]; then pass "quy ước lifecycle và danh sách tool"; else FAIL=1; fi
 
+# --- 8c. Quyền của named volume gắn vào thư mục con -------------------------
+echo; echo "8c) Docker — quyền của volume"
+if python3 scripts/check-volume-perms.py deploy/docker/docker-compose.yml; then
+  pass "không có volume nào gắn vào thư mục con của image ngoài mà thiếu init chown"
+else
+  FAIL=1
+fi
+
 # --- 9. Không có secret bị lộ trong git -------------------------------------
 echo; echo "9) Quét secret bị commit"
 if grep -rInE '(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{30,}|xox[bap]-[0-9]{10,})' \

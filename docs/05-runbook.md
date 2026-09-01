@@ -96,6 +96,32 @@ mcporter call notion.notion-create-pages parentPageId=abc content=@/tmp/body.md
 ```
 `key=@path` đọc giá trị từ tệp — dùng cho nội dung dài để khỏi thoát chuỗi trong shell.
 
+### Gateway lặp lại `EPERM: chmod '/home/node/.openclaw/state'`
+
+Đây là cái bẫy kinh điển của **named volume gắn vào thư mục con**.
+
+Khi Docker gắn một named volume vào đường dẫn **chưa tồn tại trong image**, nó
+tạo thư mục đó với chủ sở hữu `root:root`. Gateway chạy bằng user `node`
+(uid 1000) nên không `chmod` được, và chết ngay — lặp lại mãi.
+
+Hai cách xử lý, tuỳ image là của ai:
+
+| Image | Cách làm |
+|---|---|
+| **Của ta** (`build:`) | Tạo sẵn thư mục trong Dockerfile rồi `chown node:node`. Volume sẽ kế thừa đúng chủ sở hữu. |
+| **Của người khác** (`image:`) | Một init container chạy bằng `root`, `chown` rồi thoát; service chính `depends_on` nó với `condition: service_completed_successfully`. |
+
+Repo dùng cả hai: `Dockerfile.agent-runner` tạo sẵn các thư mục volume, còn
+`openclaw-init` dọn quyền cho `openclaw-state` và `openclaw-audit`.
+
+`./scripts/validate.sh` nay bắt lớp lỗi này: mọi named volume gắn vào thư mục con
+của image bên ngoài mà thiếu init container đều bị báo trước khi chạy.
+
+Một chi tiết dễ bỏ qua: **đừng dùng chung một volume cho hai image khác nhau**.
+Chủ sở hữu của volume phụ thuộc container nào khởi tạo nó trước — một nguồn lỗi
+ngẫu nhiên rất khó lần. Vì vậy audit của gateway có volume riêng
+(`openclaw-audit`) thay vì dùng chung `fleet-logs`.
+
 ### Gateway "Up vài giây" lặp lại — plugin chưa được chấp thuận quyền
 
 ```

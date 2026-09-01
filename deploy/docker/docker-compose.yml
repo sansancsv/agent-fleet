@@ -96,6 +96,33 @@ services:
   # ---------------------------------------------------------------------------
   # TẦNG ĐIỀU KHIỂN — OpenClaw Gateway
   # ---------------------------------------------------------------------------
+
+  # Bước dọn quyền, chạy một lần rồi thoát.
+  #
+  # VÌ SAO CẦN: khi một named volume được gắn vào thư mục CON chưa tồn tại trong
+  # image, Docker tạo nó với chủ sở hữu root:root. Gateway chạy bằng user `node`
+  # (uid 1000) nên không chmod được, và chết ngay lúc khởi động:
+  #     EPERM: operation not permitted, chmod '/home/node/.openclaw/state'
+  # Đây là cái bẫy kinh điển của "volume gắn vào thư mục con". Với image của
+  # người khác, cách chắc chắn nhất là một init container chạy bằng root để
+  # chuyển chủ sở hữu trước.
+  openclaw-init:
+    image: ghcr.io/openclaw/openclaw:${OPENCLAW_TAG:-2026.8.1}
+    user: root
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mkdir -p /home/node/.openclaw/state /home/node/.openclaw/audit
+        chown -R node:node /home/node/.openclaw/state /home/node/.openclaw/audit
+        chmod 700 /home/node/.openclaw/state
+        echo "[init] quyền của state và audit đã sẵn sàng"
+    volumes:
+      - openclaw-state:/home/node/.openclaw/state
+      - openclaw-audit:/home/node/.openclaw/audit
+    restart: "no"
+    logging: *logging
+
   openclaw-gateway:
     # GHIM PHIÊN BẢN. Schema cấu hình của OpenClaw đổi giữa các bản; dùng
     # ":latest" nghĩa là một hôm nào đó `docker compose pull` sẽ làm gateway
@@ -105,6 +132,7 @@ services:
     restart: unless-stopped
     depends_on:
       mcporter: { condition: service_healthy }
+      openclaw-init: { condition: service_completed_successfully }
     environment:
       <<: *common-env
       # LƯU Ý: gateway.bind KHÔNG đọc từ biến môi trường — OpenClaw đọc cấu hình
@@ -133,7 +161,10 @@ services:
       # Gắn sai chỗ nghĩa là mỗi lần tạo lại container là mất sạch: phải ghép đôi
       # kênh lại, chấp thuận quyền plugin lại, và lịch sử phiên biến mất.
       - openclaw-state:/home/node/.openclaw/state
-      - fleet-logs:/home/node/.openclaw/audit
+      # Volume audit RIÊNG, không dùng chung fleet-logs: hai image khác nhau
+      # cùng khởi tạo một volume thì chủ sở hữu phụ thuộc container nào chạy
+      # trước — một nguồn lỗi ngẫu nhiên rất khó lần.
+      - openclaw-audit:/home/node/.openclaw/audit
       # Docker socket CHỈ cần khi bật sandbox per-tool. Cân nhắc kỹ: đây là
       # quyền tương đương root trên host. Ở K8s hãy dùng runtime sandbox thay thế.
       - /var/run/docker.sock:/var/run/docker.sock
@@ -281,6 +312,7 @@ services:
     logging: *logging
 
 volumes:
+  openclaw-audit:
   pgdata:
   redisdata:
   n8ndata:

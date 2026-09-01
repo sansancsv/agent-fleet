@@ -50,7 +50,11 @@ COPY --chown=node:node profiles /fleet/profiles
 
 # Đặt lại bit thực thi: khi repo nằm trên ổ Windows (WSL /mnt/c) quyền không được giữ.
 RUN find /fleet -name '*.sh' -exec chmod +x {} + \
+ # Tạo SẴN mọi thư mục sẽ được gắn volume. Khi đường dẫn đã tồn tại trong image,
+ # Docker khởi tạo volume theo nội dung VÀ chủ sở hữu của nó — nhờ vậy tránh
+ # được lỗi volume thuộc root mà tiến trình chạy bằng node không ghi được.
  && mkdir -p /srv/repos /var/log/fleet /home/node/.acpx /home/node/.mcporter \
+      /home/node/.local/share/mcporter /home/node/.cache/mcporter \
  && chown -R node:node /srv/repos /var/log/fleet /home/node
 
 USER node
