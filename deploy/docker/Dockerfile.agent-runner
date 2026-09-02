@@ -41,7 +41,15 @@ RUN npm install -g \
  && npm cache clean --force
 
 # Codex và Gemini CLI cài riêng vì nhịp phát hành khác nhau.
-RUN npm install -g @openai/codex @google/gemini-cli || \
+# Codex CẦN THÊM adapter ACP riêng (giống Claude): gói @openai/codex chỉ cho
+# binary `codex` (CLI tương tác/exec của OpenAI), KHÔNG nói được giao thức ACP.
+# acpx.global.json cấu hình backend "codex" gọi thẳng `codex-acp` — thiếu gói
+# này, mọi lượt agent vai trò reviewer/security (dùng backend codex) chết ngay
+# với lỗi JSON-RPC "Failed to spawn agent command: codex-acp --mode stable"
+# (không phải lỗi cờ, không phải lỗi mạng — acpx không tìm thấy binary).
+# Gemini CLI thì KHÔNG cần adapter riêng: bản thân nó nói ACP qua cờ
+# --experimental-acp (đã khai trong acpx.global.json).
+RUN npm install -g @openai/codex @zed-industries/codex-acp @google/gemini-cli || \
     echo "CẢNH BÁO: một số backend chưa cài được — kiểm tra lại tên gói"
 
 COPY --chown=node:node execution-plane /fleet/execution-plane

@@ -11,9 +11,8 @@
   "defaultPermissions": "approve-reads",
   "nonInteractivePermissions": "fail",
 
+  "//agents": "Ghi đè backend theo repo — ví dụ repo hạ tầng bắt buộc dùng model nội bộ vì mã nguồn không được rời hạ tầng công ty. KHÔNG đặt khoá // bên trong agents — acpx validate mọi khoá ở đây như tên agent thật, xem acpx.global.json.",
   "agents": {
-    "//": "Ghi đè backend theo repo — ví dụ repo hạ tầng bắt buộc dùng model nội bộ",
-    "//1": "vì mã nguồn không được rời hạ tầng công ty.",
     "claude": { "argv": ["claude-code-acp"] },
     "codex": { "argv": ["codex-acp", "--mode", "stable"] }
   }

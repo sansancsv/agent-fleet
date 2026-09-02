@@ -94,13 +94,20 @@ async def run_role(
             _run_remote, runner_url, role, prompt, cwd, perm == "approve-all", timeout_s
         )
 
-    argv: list[str] = ["acpx", backend]
+    # THỨ TỰ THAM SỐ (đối chiếu acpx 0.13.2): --cwd/--format/--json-strict/
+    # --suppress-reads/--{perm} là tuỳ chọn TOÀN CỤC của `acpx`, phải đứng
+    # TRƯỚC tên backend. Đặt sau "backend exec/-s" bị từ chối
+    # "unknown option '--cwd'" — xem chú thích trong run-role.sh (nguồn sự thật
+    # cho hình dạng lệnh này; nhánh này chỉ dùng khi AGENT_RUNNER_URL trống).
+    argv: list[str] = [
+        "acpx", "--cwd", cwd, f"--{perm}", "--format", "json", "--json-strict", "--suppress-reads",
+    ]
+    argv.append(backend)
     if session:
         # Phiên có trạng thái: agent nhớ ngữ cảnh repo giữa các lượt.
         argv += ["-s", session, prompt]
     else:
         argv += ["exec", prompt]
-    argv += ["--cwd", cwd, f"--{perm}", "--format", "json", "--json-strict", "--suppress-reads"]
 
     env = {**os.environ, "ACPX_NON_INTERACTIVE": "1"}
 

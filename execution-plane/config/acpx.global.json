@@ -24,27 +24,25 @@
   "//timeout": "1800s = 30 phút cho một lượt. Bước dài hơn phải tách bước.",
   "timeout": 1800,
 
+  "//agents": "Đăng ký backend. Tên trùng built-in sẽ ghi đè. local-llm = ACP bridge nội bộ cho model tự host. ci-reviewer = hồ sơ riêng cho CI, cùng backend nhưng khoá chặt hơn.",
+  "//agentsWarning": "KHÔNG đặt khoá chú thích \"//...\" bên trong `agents` — acpx (đối chiếu 0.13.2) validate MỌI khoá ở đây như tên agent thật và đòi { command | argv }; khoá chú thích làm cả CLI chết ngay từ lệnh đầu tiên: Invalid config agents.// ... expected object with command. Đây là lỗi khác với mcporter.json, nơi khoá // ở mcpServers CON được bỏ qua.",
   "agents": {
-    "//": "Đăng ký các backend agent. Tên đặt trùng built-in sẽ ghi đè built-in.",
-
     "claude": {
       "argv": ["claude-code-acp"]
     },
     "codex": {
-      "argv": ["codex-acp", "--mode", "stable"]
+      "//": "codex-acp (đối chiếu 0.16.0) chỉ nhận -c key=value hoặc -h. Không có --mode/--profile — đặt cờ đó khiến binary thoát mã 2 trước cả bước initialize (AGENT_STARTUP_FAILED).",
+      "argv": ["codex-acp"]
     },
     "gemini": {
       "argv": ["gemini", "--experimental-acp"]
     },
-
-    "//custom": "Backend nội bộ: model tự host qua một ACP bridge do công ty viết.",
     "local-llm": {
       "argv": ["node", "/fleet/bin/local-acp-bridge.mjs", "--base-url", "${LOCAL_LLM_BASE_URL}"]
     },
-
-    "//ci": "Hồ sơ riêng cho CI: cùng backend nhưng khoá chặt hơn.",
     "ci-reviewer": {
-      "argv": ["codex-acp", "--mode", "stable", "--profile", "readonly"]
+      "//": "Hồ sơ CI 'khoá chặt hơn' còn là dự định — codex-acp không có cờ --profile; muốn siết thật thì dùng '-c key=value' (xem codex-acp --help) và điền đúng khoá cấu hình đã kiểm chứng.",
+      "argv": ["codex-acp"]
     }
   },
 

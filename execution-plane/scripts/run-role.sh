@@ -47,12 +47,19 @@ ERRLOG="$LOG_DIR/$SESSION.err"
 
 # --format json --json-strict: stdout chỉ chứa NDJSON thông điệp ACP thô,
 # mỗi dòng một thông điệp JSON-RPC → phân tích được bằng máy, không cần regex.
+#
+# THỨ TỰ THAM SỐ QUAN TRỌNG (đối chiếu acpx 0.13.2 — đọc trước khi sửa):
+#   `acpx [tuỳ-chọn-toàn-cục] <agent> exec [prompt]`
+# --cwd/--format/--deny-all/--approve-*/--json-strict/--suppress-reads là tuỳ
+# chọn TOÀN CỤC của lệnh gốc `acpx`, KHÔNG phải của lệnh con `<agent> exec`.
+# Đặt sau "$AGENT exec" sẽ bị từ chối: "error: unknown option '--cwd'" — subcommand
+# `exec` của từng agent chỉ nhận `-f/--file` và `-h/--help`.
 set +e
-acpx "$AGENT" exec "$PROMPT" \
-  --cwd "$CWD" \
+acpx --cwd "$CWD" \
   "$PERM" \
   --format json --json-strict \
   --suppress-reads \
+  "$AGENT" exec "$PROMPT" \
   > "$NDJSON" 2> "$ERRLOG"
 EXIT=$?
 set -e
