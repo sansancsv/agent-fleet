@@ -38,6 +38,26 @@ from .state import FleetState, blockers, initial_state
 
 REPO_ROOT = os.environ.get("FLEET_REPO_ROOT", "/srv/repos")
 
+# LangGraph chạy bằng root (mount /root/.acpx trong compose/K8s giả định vậy),
+# nhưng lượt agent thật (implementer, tester...) chạy qua dịch vụ agent-runner
+# bằng user `node`. `git worktree add` bên dưới tạo thư mục MỚI, và nó thuộc
+# sở hữu của tiến trình gọi nó — tức root. Không chown lại, implementer nhận
+# EACCES ngay khi mở file để ghi, lặng lẽ không viết được dòng code nào, và
+# graph vẫn đi tiếp qua review/gate như thể mọi việc suôn sẻ (diff rỗng không
+# có gì để reviewer chặn). Đã thấy lỗi này thật khi chạy demo-flow lần đầu.
+#
+# CHOWN TOÀN BỘ REPO GỐC, KHÔNG CHỈ WORKTREE: `git fetch` và `git worktree add`
+# rải file root-owned ra NHIỀU chỗ khác nhau bên trong `<repo>/.git` — đã thấy
+# thật cả tám: packed-refs, config, FETCH_HEAD, refs/heads/feat/<task-id> (và
+# thư mục cha refs/heads/feat/ vì tên nhánh có dấu "/"), logs/refs/heads/feat/
+# tương ứng, và thư mục quản trị worktrees/<tên>. Ban đầu tưởng chỉ cần chown
+# worktrees/<tên> (đủ để tạo index.lock), nhưng commit vào NHÁNH MỚI còn cần
+# ghi refs/heads/... trong repo gốc — chown lẻ từng đường dẫn là trò đuổi bắt
+# vô tận. `repo` là kho do fleet quản lý riêng cho việc này nên chown đệ quy
+# toàn bộ là an toàn.
+WORKTREE_OWNER_UID = int(os.environ.get("FLEET_WORKTREE_UID", "1000"))
+WORKTREE_OWNER_GID = int(os.environ.get("FLEET_WORKTREE_GID", "1000"))
+
 
 # ---------------------------------------------------------------------------
 # NÚT 1 — Chuẩn bị. Xác định thuần tuý, không có model tham gia.
@@ -53,6 +73,11 @@ async def prepare(state: FleetState) -> dict:
         ["git", "-C", repo, "worktree", "add", "-B", branch, worktree, "origin/main"],
         check=True,
     )
+    # Giao lại quyền sở hữu cho user thật sự sẽ ghi — cả worktree lẫn repo gốc
+    # (fetch + worktree add rải file root-owned khắp .git, xem chú thích trên).
+    owner = f"{WORKTREE_OWNER_UID}:{WORKTREE_OWNER_GID}"
+    subprocess.run(["chown", "-R", owner, repo], check=True)
+    subprocess.run(["chown", "-R", owner, worktree], check=True)
     return {"branch": branch, "worktree": worktree}
 
 

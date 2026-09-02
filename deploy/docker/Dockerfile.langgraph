@@ -23,6 +23,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG ACPX_VERSION=latest
 RUN npm install -g "acpx@${ACPX_VERSION}" && npm cache clean --force
 
+# Container này chạy bằng root (mount /root/.acpx trong compose/K8s giả định
+# vậy), nhưng thư mục /srv/repos là volume DÙNG CHUNG với agent-runner — nơi
+# tạo worktree/repo lại chạy bằng user `node` (uid 1000). Git 2.35+ chặn thao
+# tác trên repo không cùng chủ sở hữu tiến trình ("dubious ownership", vá
+# CVE-2022-24765): `prepare()` trong graph.py chết ngay ở `git fetch` với
+# "fatal: detected dubious ownership in repository at '/srv/repos/...'".
+# Tin toàn bộ /srv/repos vì đó là volume nội bộ do chính fleet quản lý.
+RUN git config --system --add safe.directory '*'
+
 WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src

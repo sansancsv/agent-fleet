@@ -12,8 +12,8 @@
   "//nonInteractive2": "an toàn hơn 'deny' (âm thầm bỏ qua) vì buộc quy trình phải xử lý.",
   "nonInteractivePermissions": "fail",
 
-  "//authPolicy": "'fail' = thiếu credential thì dừng, không chạy nửa vời.",
-  "authPolicy": "fail",
+  "//authPolicy": "'skip' — KHÔNG phải 'fail' như ý định ban đầu. Lý do (đã kiểm chứng bằng phiên Claude thật): @zed-industries/claude-code-acp 0.16.2 chỉ quảng bá auth method 'claude-login' (đăng nhập tương tác) và hàm authenticate() của nó CHƯA CÀI ĐẶT (luôn throw). acpx tự chặn TRƯỚC khi thử, báo 'no matching credentials found', dù ACPX_AUTH_ANTHROPIC_API_KEY hợp lệ và SDK bên dưới dùng được key đó bình thường (đã xác minh: lỗi thật sự nhận được là lỗi billing của Anthropic, không phải lỗi xác thực). 'fail' làm backend claude — dùng cho 5/9 vai trò — KHÔNG BAO GIỜ chạy được, bất kể credential đúng hay sai. 'skip' bỏ bước tiền kiểm; lỗi credential thật (sai key, hết credit) vẫn hiện rõ ở bước prompt qua thông báo lỗi của chính nhà cung cấp, chỉ trễ hơn.",
+  "authPolicy": "skip",
 
   "//format": "json = NDJSON các thông điệp ACP thô, để n8n/LangGraph phân tích.",
   "format": "json",
@@ -46,13 +46,13 @@
     }
   },
 
+  "//mcpServers": "Chỉ MỘT cầu nối duy nhất tới mcporter — xem capability-plane/. mcporter serve không có auth; cách ly ở tầng mạng, không phải header.",
+  "//mcpServersWarning": "acpx (đối chiếu 0.13.2) KHÔNG thay thế ${BIẾN} trong mcpServers.url — giá trị được gửi NGUYÊN VĂN cho agent (đã kiểm bằng phiên Gemini thật: session/new nhận đúng chuỗi \"${MCPORTER_BRIDGE_URL}\", không phải URL thật). Viết thẳng giá trị. Giống hệt ở cả Docker Compose lẫn K8s vì Service tên \"mcporter\" phân giải như nhau (xem MCPORTER_BRIDGE_URL trong docker-compose.yml và deploy/k8s/*.yaml).",
   "mcpServers": [
     {
-      "//": "Chỉ MỘT cầu nối duy nhất tới mcporter — xem capability-plane/.",
-      "//1": "mcporter serve không có auth; cách ly ở tầng mạng, không phải header.",
       "name": "mcporter-bridge",
       "type": "http",
-      "url": "${MCPORTER_BRIDGE_URL}"
+      "url": "http://mcporter:7420/mcp"
     }
   ],
 
