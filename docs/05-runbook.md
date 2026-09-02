@@ -344,9 +344,14 @@ pod restart. Đây là lỗi cấu hình hay gặp nhất khi lên production.
 `n8ndata` volume, hoặc nhập lại credential thủ công. **Không bao giờ đổi khoá này.**
 
 ### Chi phí tăng vọt
+Chưa có bảng chi phí theo model (nằm trong lộ trình). Hai nguồn đếm được ngay:
 ```bash
-grep '"event":"model.select"' /var/log/fleet/fleet-audit.jsonl \
-  | jq -r '.model' | sort | uniq -c | sort -rn
+# Số lượt agent theo vai trò trong 24h qua — từ log của agent-runner
+docker compose -f deploy/docker/docker-compose.yml logs --since 24h --no-log-prefix agent-runner \
+  | grep '"route":"POST /run"' | jq -r '.role' | sort | uniq -c | sort -rn
+
+# Sự kiện của gateway (tool call, run) — volume openclaw-audit
+docker compose -f deploy/docker/docker-compose.yml exec openclaw-gateway ls -la /home/node/.openclaw/audit
 ```
 Ba nguyên nhân thường gặp, theo thứ tự: vòng lặp sửa lại không giới hạn; dùng
 model suy luận sâu cho việc phân loại; ngữ cảnh phình vì phiên không xoay vòng.
@@ -357,13 +362,15 @@ model suy luận sâu cho việc phân loại; ngữ cảnh phình vì phiên kh
 
 ### Thêm một vai trò agent
 1. Thêm mục vào `control-plane/config.d/agents.json`
-2. Thêm vai trò tương ứng vào `policy/tool-policy.yaml` **và** `policy/opa/fleet.rego`
+2. Thêm vai trò tương ứng vào `policy/tool-policy.yaml` **và** `policy/opa/fleet.rego` (+ `fleet_test.rego`)
 3. Thêm ánh xạ trong `execution-plane/scripts/run-role.sh` và `acpx_client.py::ROLE_BACKENDS`
+   (API agent-runner không có bảng riêng — nó giao cho `run-role.sh`)
 4. Tạo `workspaces/<vai-trò>/SOUL.md`
-5. `./scripts/validate.sh` — script sẽ báo nếu bốn nơi trên không khớp
+5. `./scripts/validate.sh` — script chỉ so `agents.json` với `tool-policy.yaml`;
+   rego, `run-role.sh` và `ROLE_BACKENDS` phải tự soát bằng mắt
 
 ### Đổi model của một vai trò
-Sửa `agents.entries.<vai-trò>.model` trong `agents.json`. Gateway tự nạp lại.
+Sửa `agents.entries.<vai-trò>.model` trong `agents.json`, rồi `make restart-gateway`.
 **Kiểm tra lại quy tắc đa dạng hoá:** nếu đổi model của `implementer` sang cùng
 nhà cung cấp với `reviewer`, `validate.sh` sẽ báo lỗi.
 

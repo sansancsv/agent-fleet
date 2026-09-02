@@ -110,8 +110,11 @@ Script sẽ báo lỗi nếu: gói năng lực không tồn tại, hoặc ngư�
 | `confidential` | dữ liệu khách hàng đã ẩn danh | Claude, model tự host | yêu cầu zero-retention |
 | `restricted` | lương, hồ sơ nhân sự, hợp đồng | **chỉ model tự host** | không ra Internet |
 
-Ràng buộc này được cưỡng chế ở ba nơi: `policies.py::assert_backend_allowed`,
-`policy/opa/fleet.rego`, và NetworkPolicy của Kubernetes.
+Ràng buộc này được khai báo ở ba nơi phải khớp nhau: `policies.py::MODEL_POLICY`,
+`policy/opa/fleet.rego`, và `policy/model-routing.yaml`. Thứ thực sự cưỡng chế
+lúc chạy hôm nay là hồ sơ phòng ban (trường `agents.*` chọn backend) cộng
+NetworkPolicy của Kubernetes; `assert_backend_allowed` và OPA có test nhưng chưa
+được gọi trong đường chạy — việc nối chúng nằm trong lộ trình cải tiến.
 
 ---
 

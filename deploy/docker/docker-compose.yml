@@ -1,10 +1,10 @@
 # =============================================================================
 # AGENT FLEET — ngăn xếp đầy đủ cho môi trường staging / máy phát triển
 # -----------------------------------------------------------------------------
-# 7 dịch vụ, 4 tầng:
+# 8 dịch vụ (+ openclaw-init chạy một lần), 4 tầng:
 #   Tầng điều khiển  : openclaw-gateway     (cổng vào, định tuyến agent)
 #   Tầng năng lực    : mcporter             (một cầu nối MCP duy nhất)
-#   Tầng thực thi    : agent-runner         (acpx + các backend agent)
+#   Tầng thực thi    : agent-runner         (API HTTP :8787 → acpx + các backend agent)
 #   Tầng điều phối   : langgraph, n8n(+worker)
 #   Hạ tầng          : postgres, redis
 #

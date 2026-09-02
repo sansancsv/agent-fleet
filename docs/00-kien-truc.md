@@ -43,14 +43,17 @@ Ranh giới rõ nghĩa là: **đổi một tầng không phải sửa ba tầng 
    • triage   : phân loại rủi ro                          ← model, đầu ra ép về 3 nhãn
    • implement: acpx claude, quyền approve-all            ← phi xác định
    • review   : acpx codex,  quyền deny-all               ← khác nhà cung cấp
+     (mỗi lượt agent = một POST /run tới dịch vụ agent-runner)
    • gate     : hàm thuần tuý đếm mục chặn                ← xác định
    • approval : interrupt() — ghi trạng thái, giải phóng pod
         │
-5. Người duyệt trong Slack → LangGraph chạy tiếp từ đúng đó
+5. Người duyệt → POST /runs/<id>/resume, `by` phải nằm trong approvers của hồ sơ
+   → LangGraph chạy tiếp từ đúng đó
         │
 6. open_pr : push + gh pr create --draft
         │
-7. Mọi bước trên đều ghi vào audit log JSONL
+7. Dấu vết: audit của gateway (volume openclaw-audit), permission.decision của
+   LangGraph và log từng lượt của agent-runner — xem docs/04 §5
 ```
 
 Điểm cần chú ý ở bước 4: **mọi lần agent chạm ra ngoài đều đi qua mcporter**, và

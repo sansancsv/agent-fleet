@@ -59,8 +59,8 @@ cần thêm một model tự host:
 
 ### 4. Khởi động
 ```bash
-make up        # dựng ảnh + khởi động 7 dịch vụ
-make health    # 4 kiểm tra sức khoẻ
+make up        # dựng ảnh + khởi động 8 dịch vụ (+1 container init dọn quyền)
+make health    # 5 kiểm tra sức khoẻ: mcporter · agent-runner · gateway · LangGraph · n8n
 ```
 
 Cổng mở ra (chỉ trên loopback, không ra ngoài máy):
@@ -82,7 +82,8 @@ docker compose -f deploy/docker/docker-compose.yml exec openclaw-gateway \
   openclaw channels login --channel slack --account acc-engineering
 ```
 Rồi thêm ID kênh Slack thật vào `control-plane/config.d/bindings.json`
-(thay `C_FLEET_ARCH`, `C_FLEET_REVIEW`, …). Gateway tự nạp lại cấu hình.
+(thay `C_FLEET_ARCH`, `C_FLEET_REVIEW`, …), rồi `make restart-gateway` (lệnh này
+chạy `oc-validate` trước khi khởi động lại).
 
 ---
 
@@ -138,12 +139,16 @@ một tập phòng ban, không phải nhiều bản sao của cùng một gatewa
 ./scripts/validate.sh
 ```
 
-10 nhóm kiểm tra, trong đó ba nhóm là **kiểm tra nhất quán** — quan trọng hơn
-kiểm tra cú pháp:
+16 nhóm kiểm tra. Ngoài cú pháp (JSON5, JSON, YAML, shell, Python, Node), phần
+đáng giá là các **kiểm tra nhất quán và quy ước** — quan trọng hơn cú pháp:
 
-- Vai trò trong `openclaw.json` phải khớp `policy/tool-policy.yaml`
+- Vai trò trong `agents.json` phải khớp `policy/tool-policy.yaml`
 - Mỗi hồ sơ phòng ban phải trỏ tới một gói năng lực có thật
-- Người soạn và người thẩm định phải khác nhà cung cấp
+- Người soạn và người thẩm định trong hồ sơ phải khác backend
+- `${BIẾN}` trong cấu hình OpenClaw chỉ ở trường credential; không SecretRef; không `env.vars`
+- `${VAR}` trong mcporter phải có mặc định; tên tool chính xác; `lifecycle` có `mode`
+- Named volume gắn vào thư mục con của image ngoài phải có init container
+- Workflow n8n không được có node executeCommand
 
 Cấu hình đúng cú pháp nhưng mâu thuẫn giữa các tầng là cách quyền bị rò trong
 thực tế. Chạy script này trong CI (`.github/workflows/fleet-ci.yml` đã có sẵn).

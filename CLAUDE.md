@@ -44,6 +44,19 @@ python -m pytest tests/test_policies.py::TestFindingParsing::test_blocker_khong_
 ruff check src tests        # CI chạy ruff; line-length 100
 ```
 
+Nếu host không có venv và không muốn cài (đã dùng cách này trên máy Windows có `uv`):
+
+```bash
+cd orchestration/langgraph && PYTHONPATH=src uv run --no-project --python 3.12 \
+  --with "pytest>=8" --with "pytest-asyncio>=0.24" --with "langgraph>=1.0" \
+  --with "langgraph-checkpoint-postgres>=2.0" --with "psycopg[binary,pool]>=3.2" \
+  --with "fastapi>=0.115" --with httpx --with "pyyaml>=6.0" python -m pytest tests/ -q -p no:cacheprovider
+```
+
+Runner API (Node thuần, không có package.json): `node --check execution-plane/runner/server.mjs`. `validate.sh` bước 5b làm việc này khi có `node`; bước 5c từ chối mọi workflow n8n chứa `n8n-nodes-base.executeCommand`.
+
+Từ Windows, chạy script kiểm chứng trong WSL: `wsl -d Ubuntu -- bash -lc 'cd ~/agent-fleet && ./scripts/validate.sh'` (shell không tương tác của WSL không có `node`/`pytest` trên PATH; validate.sh tự bỏ qua các bước đó và báo rõ).
+
 CI (`.github/workflows/fleet-ci.yml`) chạy đúng các bước: `scripts/validate.sh`, `opa test`, `ruff` + `pytest`, build image agent-runner + trivy, gitleaks.
 
 ## Kiến trúc: bốn tầng, hai bộ điều phối
@@ -92,6 +105,8 @@ Thêm phòng ban = thêm `profiles/<tên>.yaml` (schema ở `profiles/_schema.ya
 
 Hai chốt fail-closed trong `server.py`: mọi endpoint trừ `/ok` đòi `Authorization: Bearer $LANGGRAPH_TOKEN` (thiếu biến → 503 cho tất cả); `/runs/{id}/resume` chỉ chấp nhận `by` nằm trong `approvers` của hồ sơ gắn với thread (`profile` trong state, mặc định `engineering`), nếu không → 403 và ghi `permission.decision` ra stdout.
 
+Khi thêm endpoint mới: gắn `dependencies=[Protected]` (trừ healthcheck), và trong `tests/test_server.py` gửi header `AUTH` (fixture `client` đã đặt `LANGGRAPH_TOKEN`). Khi thêm điểm cuối cho runner (`server.mjs`): thêm vào bảng `ROUTES`, kiểm đầu vào bằng regex/đường dẫn tuyệt đối trong `FLEET_REPO_ROOT` như các handler hiện có, không bao giờ dựng chuỗi shell. Runner cố ý không có bảng vai trò riêng (chỉ kiểm regex rồi giao cho `run-role.sh`) để không thành nơi khai vai trò thứ sáu.
+
 ## Bẫy cấu hình đã trả giá (đối chiếu OpenClaw 2026.8.1, mcporter 0.13.8)
 
 Phần lớn được `scripts/validate.sh` và `scripts/check-oc-placeholders.py` bắt; đọc trước khi sửa để không phải đi vòng.
@@ -118,4 +133,6 @@ Phần lớn được `scripts/validate.sh` và `scripts/check-oc-placeholders.p
 
 - Trên WSL, đặt repo trên filesystem Linux (`~/agent-fleet`), không phải `/mnt/c`: mất bit `+x`, `.env` không giữ được 600, I/O chậm. Compose gọi script qua `bash <path>` để chịu được mất `+x`.
 - Các file `*:Zone.Identifier` là rác do Windows sinh khi tải file; không tạo thêm, không tham chiếu.
-- `.env` không commit; `bootstrap.sh` sinh khoá nội bộ (gồm `LANGGRAPH_TOKEN`, `AGENT_RUNNER_TOKEN`, cả hai bắt buộc), người dùng tự điền `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`.
+- Git trên Windows đang cảnh báo "LF will be replaced by CRLF": mọi file trong repo phải giữ **LF**. Script `.sh`, `.mjs`, cấu hình được mount thẳng vào container Linux; CRLF làm hỏng shebang và JSON5.
+- `.env` không commit; `bootstrap.sh` sinh khoá nội bộ (gồm `LANGGRAPH_TOKEN`, `AGENT_RUNNER_TOKEN`, cả hai bắt buộc), người dùng tự điền `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`. Thêm biến bắt buộc mới thì phải sửa đủ ba nơi: `.env.example`, danh sách `for KEY in` của `bootstrap.sh`, và `${VAR:?...}` trong compose.
+- Cấu hình quyền của Claude Code trên máy này **chặn đọc/ghi mọi file `.env*`** (kể cả `.env.example`) qua cả Read/Edit lẫn Bash. Đừng thử vòng qua; ghi rõ dòng cần thêm và để người dùng tự sửa.

@@ -76,7 +76,7 @@ git clone <repo> agent-fleet && cd agent-fleet
 ./scripts/preflight.sh  # đối chiếu CLI thật đã cài với những gì repo giả định
 $EDITOR .env            # điền ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY
 
-make up                 # khởi động 7 dịch vụ
+make up                 # khởi động 8 dịch vụ
 make health             # kiểm tra sức khoẻ
 make agents             # xem đội hình và luật định tuyến
 make audit              # rà soát bảo mật + test chính sách
@@ -99,6 +99,7 @@ execution-plane/        acpx — nơi agent thật chạy
   config/               cấu hình toàn cục và cấu hình theo repo
   flows/                quy trình xác định viết bằng TypeScript
   scripts/              run-role.sh · fanout-review.sh · session-pool.sh
+  runner/               server.mjs — API HTTP của tầng thực thi (POST /run), n8n và LangGraph gọi vào đây
 
 capability-plane/       mcporter — một nguồn sự thật cho mọi MCP server
   mcporter.json         khai báo server + lọc tool
@@ -114,7 +115,7 @@ orchestration/
 
 profiles/               MỘT FILE = MỘT PHÒNG BAN  ← cơ chế mở rộng
 policy/                 tool-policy · model-routing · OPA rego (có test)
-deploy/docker/          compose 7 dịch vụ + 2 Dockerfile
+deploy/docker/          compose 8 dịch vụ (+1 init) + 2 Dockerfile
 deploy/k8s/             namespace · RBAC · NetworkPolicy · ExternalSecrets · 4 Deployment
 docs/                   tài liệu tiếng Việt
 ```

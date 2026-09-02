@@ -31,11 +31,13 @@ Ví dụ với quyền ghi file của `reviewer`:
 |---|---|---|
 | 1 | OpenClaw tool policy | `tools: { deny: ["write","exec"] }` |
 | 2 | acpx permission mode | `--deny-all` trong `run-role.sh` |
-| 3 | OPA | `role_capabilities.reviewer` không có `write` |
-| 4 | Kubernetes | không mount PVC repo ở chế độ ghi |
+| 3 | OPA | `role_capabilities.reviewer` không có `write` — **hiện chỉ có test, chưa được gọi lúc chạy** (xem lộ trình) |
+| 4 | Kubernetes | không có ServiceAccount token, NetworkPolicy chặn ra ngoài; PVC repo mount RW cho mọi vai trò nên quyền ghi KHÔNG bị chặn ở tầng này |
 
-`scripts/validate.sh` kiểm tra tầng 1 và 3 khớp nhau. Một tầng cấu hình sai thì
-ba tầng còn lại vẫn giữ.
+`scripts/validate.sh` kiểm tra tầng 1 khớp với `policy/tool-policy.yaml` (bản mô
+tả người đọc được). Rego, cờ acpx trong `run-role.sh` và `ROLE_BACKENDS` trong
+`acpx_client.py` phải tự soát khi đổi vai trò. Với `reviewer` hôm nay, hai tầng
+thật sự giữ là 1 và 2.
 
 ---
 
@@ -57,10 +59,15 @@ thẻ này là **dữ liệu để đọc**, không phải **mệnh lệnh để
 `reviewer`) không có `write` và `exec`. Kể cả bị dẫn dụ hoàn toàn cũng không làm
 được gì.
 
-**c. Chặn mạng.** `agent-runner` không ra được Internet trực tiếp
+**c. Chặn mạng.** Ở Kubernetes, `agent-runner` không ra được Internet trực tiếp
 (`20-networkpolicy.yaml`). Chỉ `mcporter` ra được, và chỉ cổng 443, và có chặn
 `169.254.169.254` (metadata endpoint của cloud — đường tuồn thông tin xác thực
-kinh điển).
+kinh điển). **Docker Compose không có lớp này** — mọi container ra Internet tự
+do; vì vậy compose chỉ dành cho máy phát triển và staging nội bộ.
+
+**e. Không có shell giữa dữ liệu ngoài và tiến trình.** n8n gọi agent qua HTTP
+(`POST /run` của agent-runner), không dùng node executeCommand; runner đưa prompt
+vào argv bằng `spawn()`. `validate.sh` từ chối workflow có executeCommand.
 
 **d. Danh sách lệnh cấm tuyệt đối.** `policy/opa/fleet.rego` chặn theo mẫu:
 `git push --force`, `DROP TABLE`, `kubectl delete`, `curl api.openai.com`
@@ -79,10 +86,12 @@ năng lực mà secret mở ra.
 | Đưa vào tiến trình | biến môi trường, chỉ trong đúng lượt chạy | ghi vào workspace |
 | Token MCP | trong vault của mcporter, không rải rác | lặp lại ở nhiều file cấu hình |
 | Xoay vòng | `refreshInterval: 1h` trong ExternalSecret | thủ công mỗi quý |
-| Ghi log | `redact: ["**.apiKey","**.token", ...]` | log nguyên request |
+| Ghi log | `logging.redactPatterns` trong `config.d/security.json` (mẫu `sk-…`, `ghp_…`, `xox…`, `Bearer …`) | log nguyên request |
 
-Cấu hình OpenClaw dùng `{ source: "env", id: "TÊN_BIẾN" }` thay vì giá trị trực
-tiếp — nhờ đó file cấu hình commit vào git được.
+Cấu hình OpenClaw dùng chuỗi `"${TÊN_BIẾN}"` ở trường credential thay vì giá trị
+trực tiếp — nhờ đó file cấu hình commit vào git được. **Không dùng SecretRef
+object** `{ source, provider, id }`: nó qua được `config validate` rồi làm gateway
+chết lúc khởi động nếu provider chưa đăng ký; `validate.sh` cấm dạng này.
 
 **Nếu nghi ngờ lộ khoá:** xoay vòng ngay, đừng điều tra trước. Xoay vòng mất 5
 phút; điều tra mất 5 giờ và trong 5 giờ đó khoá vẫn dùng được.
@@ -91,18 +100,25 @@ phút; điều tra mất 5 giờ và trong 5 giờ đó khoá vẫn dùng đư�
 
 ## 5. Nhật ký kiểm toán
 
-`config.d/security.json` ghi JSONL cho tám loại sự kiện: `tool.call`,
-`tool.result`, `model.select`, `model.fallback`, `agent.handoff`,
-`permission.decision`, `session.create`, `config.change`.
+Hiện có bốn nguồn, mỗi nguồn một nơi:
 
-Nhật ký này trả lời được ba câu hỏi mà kiểm toán viên luôn hỏi:
+| Nguồn | Cấu hình / mã | Ghi ở đâu | Nội dung |
+|---|---|---|---|
+| Gateway OpenClaw | `config.d/security.json`: `logging.audit { enabled, executionIdentity, messages: "all" }` | volume `openclaw-audit` (`/home/node/.openclaw/audit`) | sự kiện run, tool call, tin nhắn — định dạng do OpenClaw quy định |
+| LangGraph | `server.py::_audit` | stdout container `langgraph` | `permission.decision`: ai duyệt/từ chối thread nào, được chấp nhận hay bị 403 |
+| agent-runner | `runner/server.mjs::log` | stdout container `agent-runner` | mỗi lượt: route, role, mã HTTP, thời gian |
+| n8n | node "Ghi nhật ký kiểm toán" trong workflow 01 | **chỉ trong execution data của n8n** | requestId, requester, profile, nhánh |
 
-1. *Ai đã yêu cầu gì, khi nào?* → `session.create` + n8n audit node
-2. *Agent đã chạm vào hệ thống nào?* → `tool.call` + `tool.result`
-3. *Vì sao một hành động bị chặn?* → `permission.decision` + `deny_reason` của OPA
+Ba câu hỏi kiểm toán viên luôn hỏi, và nguồn trả lời:
 
-Đẩy vào Loki/OpenSearch/Splunk. Giữ tối thiểu 12 tháng nếu thuộc phạm vi SOC 2
-hoặc ISO 27001.
+1. *Ai đã yêu cầu gì, khi nào?* → n8n execution data + audit của gateway
+2. *Agent đã chạm vào hệ thống nào?* → audit của gateway (tool call qua mcporter)
+3. *Vì sao một hành động bị chặn?* → `permission.decision` của LangGraph; `deny_reason`
+   của OPA **chưa có** vì OPA chưa được gọi lúc chạy
+
+Việc còn thiếu, theo lộ trình: gom cả bốn về một nơi (Loki/OpenSearch/Splunk),
+và cho node n8n ghi ra ngoài thay vì chỉ giữ trong execution data. Giữ tối thiểu
+12 tháng nếu thuộc phạm vi SOC 2 hoặc ISO 27001.
 
 ---
 
@@ -110,12 +126,13 @@ hoặc ISO 27001.
 
 Hai lớp, dùng cả hai:
 
-**Lớp ứng dụng** — `agents.defaults.sandbox` của OpenClaw:
+**Lớp ứng dụng** — `agents.defaults.sandbox` của OpenClaw (đúng schema 2026.8.1):
 ```json5
-sandbox: { mode: "all", scope: "agent", network: "none",
-           limits: { cpus: 2, memoryMb: 4096, timeoutMs: 900000 } }
+sandbox: { mode: "all", scope: "agent", workspaceAccess: "rw" }
 ```
 `scope: "agent"` là quan trọng: agent này không thấy được filesystem của agent khác.
+Schema **không có** `network` hay `limits` — cách ly mạng làm bằng NetworkPolicy,
+giới hạn tài nguyên làm bằng `resources` của pod / `deploy.resources` của compose.
 
 **Lớp hạ tầng** — runtime sandbox trong Kubernetes:
 ```yaml
@@ -157,6 +174,9 @@ trong LangGraph. Hết lượt thì leo thang cho người — không thử ti�
 - [ ] Secret nằm trong Vault, không trong git, không trong `.env` production
 - [ ] Ảnh container đã ghim phiên bản, đã quét lỗ hổng
 - [ ] `agent-runner` chạy non-root, có runtime sandbox
+- [ ] `AGENT_RUNNER_TOKEN` và `LANGGRAPH_TOKEN` đã đặt (cả hai dịch vụ từ chối chạy/phục vụ khi thiếu)
+- [ ] Danh sách `approvers` trong mọi `profiles/*.yaml` là người thật, khác `requesters` với dữ liệu confidential/restricted
+- [ ] Không workflow n8n nào có node executeCommand (`validate.sh` bước 5c)
 - [ ] Nhật ký kiểm toán đang chảy vào hệ thống log tập trung
 - [ ] Ngân sách và giới hạn vòng lặp đã đặt
 - [ ] Bảo vệ nhánh trên GitHub: không cho push thẳng vào `main`

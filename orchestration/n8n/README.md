@@ -46,8 +46,9 @@ N8N_RUNNERS_ENABLED=true          # tách việc chạy Code node ra tiến trì
 OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS=true
 ```
 
-Cấu hình gồm ba tiến trình: `n8n` (giao diện + trigger), `n8n-worker` (chạy thật,
-nhân bản được), `n8n-webhook` (nhận webhook, tách khỏi giao diện).
+Cấu hình trong compose gồm hai tiến trình: `n8n` (giao diện + trigger + nhận
+webhook) và `n8n-worker` (chạy thật, nhân bản được). Khi lưu lượng webhook lớn,
+tách thêm tiến trình `n8n webhook` riêng — chưa có trong compose hiện tại.
 
 ## Nhập workflow
 
