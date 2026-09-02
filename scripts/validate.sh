@@ -53,6 +53,29 @@ while IFS= read -r f; do
   if python3 -m py_compile "$f" 2>/dev/null; then pass "$f"; else fail "$f — lỗi cú pháp"; fi
 done < <(find orchestration/langgraph -name '*.py')
 
+# --- 5b. Node (API của agent-runner) ----------------------------------------
+echo; echo "5b) Cú pháp Node"
+if command -v node >/dev/null 2>&1; then
+  for f in execution-plane/runner/*.mjs; do
+    if node --check "$f" 2>/dev/null; then pass "$f"; else fail "$f — lỗi cú pháp"; fi
+  done
+else
+  echo "  (chưa cài node — bỏ qua)"
+fi
+
+# --- 5c. n8n KHÔNG được chạy lệnh shell -------------------------------------
+# Node executeCommand chạy trong container n8n-worker (không có acpx) và ghép
+# dữ liệu webhook vào chuỗi shell — chèn lệnh thật sự. Mọi lượt agent phải đi
+# qua API của agent-runner (POST /run) bằng node httpRequest.
+echo; echo "5c) n8n — không dùng executeCommand"
+for f in orchestration/n8n/workflows/*.json; do
+  if grep -q '"n8n-nodes-base.executeCommand"' "$f"; then
+    fail "$f dùng executeCommand — chuyển sang httpRequest tới \$env.AGENT_RUNNER_URL/run"
+  else
+    pass "$f"
+  fi
+done
+
 # --- 6. NHẤT QUÁN: vai trò trong openclaw phải khớp policy và script ---------
 echo; echo "6) Nhất quán vai trò giữa các tầng"
 ROLES_OC=$(python3 scripts/json5_to_json.py control-plane/config.d/agents.json \

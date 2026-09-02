@@ -1,7 +1,7 @@
 {
   "name": "Fleet · Tiếp nhận & định tuyến yêu cầu",
   "meta": {
-    "description": "Cửa vào duy nhất cho mọi yêu cầu từ các phòng ban. Đây là tầng XÁC ĐỊNH: xác thực, kiểm tra quyền, phân loại, rồi mới chuyển sang tầng agent. Không có model nào được gọi trước khi qua hai chốt kiểm tra đầu tiên — đó là cách chặn cả rò rỉ dữ liệu lẫn cháy hoá đơn."
+    "description": "Cửa vào duy nhất cho mọi yêu cầu từ các phòng ban. Đây là tầng XÁC ĐỊNH: xác thực, kiểm tra quyền, phân loại, rồi mới chuyển sang tầng agent. Không có model nào được gọi trước khi qua hai chốt kiểm tra đầu tiên — đó là cách chặn cả rò rỉ dữ liệu lẫn cháy hoá đơn. Mọi lượt agent đi qua HTTP tới agent-runner; workflow này KHÔNG chạy lệnh shell."
   },
   "settings": { "executionOrder": "v1", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "all", "timezone": "Asia/Ho_Chi_Minh" },
   "nodes": [
@@ -23,7 +23,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// CHỐT 1 — Chuẩn hoá và làm sạch đầu vào.\n// Mọi thứ đến từ bên ngoài đều là DỮ LIỆU KHÔNG TIN CẬY.\n// Ta không bao giờ ghép thẳng vào prompt mà không bọc thẻ <untrusted>.\nconst body = $input.first().json.body ?? $input.first().json;\n\nconst clean = (s, max) => String(s ?? '')\n  .replace(/\\u0000/g, '')\n  .slice(0, max);\n\nreturn [{\n  json: {\n    requestId: `REQ-${Date.now().toString(36).toUpperCase()}`,\n    profile:   clean(body.profile, 40)   || 'engineering',\n    requester: clean(body.requester, 80),\n    request:   clean(body.request, 8000),\n    repo:      clean(body.repo, 200),\n    priority:  ['low','normal','high','urgent'].includes(body.priority) ? body.priority : 'normal',\n    receivedAt: new Date().toISOString(),\n  }\n}];"
+        "jsCode": "// CHỐT 1 — Chuẩn hoá và làm sạch đầu vào.\n// Mọi thứ đến từ bên ngoài đều là DỮ LIỆU KHÔNG TIN CẬY.\n// Ta không bao giờ ghép thẳng vào prompt mà không bọc thẻ <untrusted>,\n// và KHÔNG BAO GIỜ ghép vào lệnh shell — workflow này không có node nào chạy shell.\nconst body = $input.first().json.body ?? $input.first().json;\n\nconst clean = (s, max) => String(s ?? '')\n  .replace(/\\u0000/g, '')\n  .slice(0, max);\n\nreturn [{\n  json: {\n    requestId: `REQ-${Date.now().toString(36).toUpperCase()}`,\n    profile:   clean(body.profile, 40)   || 'engineering',\n    requester: clean(body.requester, 80),\n    request:   clean(body.request, 8000),\n    repo:      clean(body.repo, 200),\n    priority:  ['low','normal','high','urgent'].includes(body.priority) ? body.priority : 'normal',\n    receivedAt: new Date().toISOString(),\n  }\n}];"
       },
       "id": "n-normalize",
       "name": "Chuẩn hoá đầu vào",
@@ -33,9 +33,9 @@
     },
     {
       "parameters": {
-        "url": "={{ $env.FLEET_PROFILE_API }}/profiles/{{ $json.profile }}/authorize",
+        "url": "={{ $env.LANGGRAPH_URL }}/profiles/{{ $json.profile }}/authorize",
         "sendHeaders": true,
-        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.FLEET_PROFILE_TOKEN }}" }] },
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.LANGGRAPH_TOKEN }}" }] },
         "sendQuery": true,
         "queryParameters": { "parameters": [{ "name": "requester", "value": "={{ $json.requester }}" }] },
         "options": { "timeout": 8000, "response": { "response": { "neverError": true } } }
@@ -148,14 +148,24 @@
     },
     {
       "parameters": {
-        "command": "=/fleet/execution-plane/scripts/run-role.sh analyst /srv/data \"{{ $('Chuẩn hoá đầu vào').item.json.request.replace(/\"/g, '\\\\\"') }}\""
+        "method": "POST",
+        "url": "={{ $env.AGENT_RUNNER_URL }}/run",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "Authorization", "value": "=Bearer {{ $env.AGENT_RUNNER_TOKEN }}" },
+          { "name": "X-Fleet-Request-Id", "value": "={{ $('Chuẩn hoá đầu vào').item.json.requestId }}" }
+        ]},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ role: 'analyst', cwd: '/srv/repos', timeoutS: 900, prompt: 'Yêu cầu từ phòng ' + $('Chuẩn hoá đầu vào').item.json.profile + '. Trả lời ngắn, kèm nguồn.\\n\\n<untrusted source=\"requester\">\\n' + $('Chuẩn hoá đầu vào').item.json.request + '\\n</untrusted>' }) }}",
+        "options": { "timeout": 960000 }
       },
       "id": "n-to-dept",
       "name": "→ Agent phòng ban",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [600, 380],
-      "notes": "Yêu cầu ngắn của phòng ban ngoài kỹ thuật: gọi thẳng một lượt agent, không cần đồ thị."
+      "notes": "Yêu cầu ngắn của phòng ban ngoài kỹ thuật: một lượt agent qua API agent-runner. Nội dung yêu cầu đi trong JSON body — không có shell nào diễn giải nó."
     },
     {
       "parameters": {

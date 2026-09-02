@@ -1,7 +1,7 @@
 {
   "name": "Fleet · Cổng thẩm định pull request",
   "meta": {
-    "description": "GitHub mở PR → thẩm định chéo bằng 3 model song song → hợp nhất → đăng nhận xét → cập nhật trạng thái commit. Toàn bộ phần điều phối là XÁC ĐỊNH; chỉ nội dung nhận xét là do model sinh."
+    "description": "GitHub mở PR → thẩm định chéo bằng 3 model song song → hợp nhất → đăng nhận xét → cập nhật trạng thái commit. Toàn bộ phần điều phối là XÁC ĐỊNH; chỉ nội dung nhận xét là do model sinh. Clone, chạy agent và dọn dẹp đều qua API của agent-runner — workflow này không chạy lệnh shell."
   },
   "settings": { "executionOrder": "v1", "saveDataErrorExecution": "all", "timezone": "Asia/Ho_Chi_Minh" },
   "nodes": [
@@ -46,42 +46,71 @@
     },
     {
       "parameters": {
-        "command": "=set -e\nREPO=\"{{ $json.body.repository.full_name }}\"\nPR={{ $json.body.pull_request.number }}\nWT=/srv/repos/pr-$PR\nrm -rf \"$WT\"\ngit clone --depth 50 \"https://x-access-token:$GITHUB_TOKEN@github.com/$REPO.git\" \"$WT\"\ncd \"$WT\"\ngit fetch origin \"pull/$PR/head:pr-$PR\"\ngit checkout \"pr-$PR\"\necho \"$WT\""
+        "method": "POST",
+        "url": "={{ $env.AGENT_RUNNER_URL }}/pr/checkout",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.AGENT_RUNNER_TOKEN }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ repo: $json.body.repository.full_name, pr: Number($json.body.pull_request.number) }) }}",
+        "options": { "timeout": 300000 }
       },
       "id": "w-clone",
       "name": "Lấy mã nguồn PR",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [-160, 300]
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-160, 300],
+      "notes": "agent-runner kiểm tra repo (owner/name) và số PR rồi mới clone; token GitHub đi qua biến môi trường git, không nằm trong URL. Trả về { path }."
     },
     {
       "parameters": {
-        "command": "=/fleet/execution-plane/scripts/run-role.sh reviewer \"{{ $json.stdout.trim() }}\" \"Xem diff so với origin/main. CHỈ ĐỌC. Mỗi phát hiện: [MỨC] file:dòng | mô tả | kịch bản hỏng. Mức: BLOCKER|MAJOR|MINOR|NIT.\""
+        "method": "POST",
+        "url": "={{ $env.AGENT_RUNNER_URL }}/run",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.AGENT_RUNNER_TOKEN }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ role: 'reviewer', cwd: $('Lấy mã nguồn PR').item.json.path, prompt: 'Xem diff so với origin/main. CHỈ ĐỌC. Mỗi phát hiện: [MỨC] file:dòng | mô tả | kịch bản hỏng. Mức: BLOCKER|MAJOR|MINOR|NIT.' }) }}",
+        "options": { "timeout": 1860000 }
       },
       "id": "w-rev-1",
       "name": "Thẩm định · Codex",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [80, 140]
     },
     {
       "parameters": {
-        "command": "=/fleet/execution-plane/scripts/run-role.sh security \"{{ $('Lấy mã nguồn PR').item.json.stdout.trim() }}\" \"Rà bảo mật diff. CHỈ ĐỌC. Tìm: secret bị commit, đầu vào không tin cậy chạm tới lệnh/truy vấn/đường dẫn, quyền bị nới rộng, phụ thuộc mới. Mỗi phát hiện: [MỨC] file:dòng | đường tấn công | cách chặn.\""
+        "method": "POST",
+        "url": "={{ $env.AGENT_RUNNER_URL }}/run",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.AGENT_RUNNER_TOKEN }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ role: 'security', cwd: $('Lấy mã nguồn PR').item.json.path, prompt: 'Rà bảo mật diff. CHỈ ĐỌC. Tìm: secret bị commit, đầu vào không tin cậy chạm tới lệnh/truy vấn/đường dẫn, quyền bị nới rộng, phụ thuộc mới. Mỗi phát hiện: [MỨC] file:dòng | đường tấn công | cách chặn.' }) }}",
+        "options": { "timeout": 1860000 }
       },
       "id": "w-rev-2",
       "name": "Thẩm định · Bảo mật",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [80, 300]
     },
     {
       "parameters": {
-        "command": "=/fleet/execution-plane/scripts/run-role.sh analyst \"{{ $('Lấy mã nguồn PR').item.json.stdout.trim() }}\" \"Đánh giá độ bao phủ test của diff. Nêu nhánh nào chưa được test và rủi ro kèm theo. [MỨC] file:dòng | mô tả.\""
+        "method": "POST",
+        "url": "={{ $env.AGENT_RUNNER_URL }}/run",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.AGENT_RUNNER_TOKEN }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ role: 'analyst', cwd: $('Lấy mã nguồn PR').item.json.path, prompt: 'Đánh giá độ bao phủ test của diff. Nêu nhánh nào chưa được test và rủi ro kèm theo. [MỨC] file:dòng | mô tả.' }) }}",
+        "options": { "timeout": 1860000 }
       },
       "id": "w-rev-3",
       "name": "Thẩm định · Kiểm thử",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [80, 460]
     },
     {
@@ -99,7 +128,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Hợp nhất phát hiện bằng LUẬT, không bằng model.\n// Quy tắc \"bằng chứng hoặc im lặng\": BLOCKER không có file:dòng thì bị loại.\nconst RE = /\\[?(BLOCKER|CRITICAL|MAJOR|MINOR|NIT)\\]?\\s*([\\w./-]+:\\d+)?\\s*[|:-]?\\s*(.+)/i;\nconst RANK = { CRITICAL: 5, BLOCKER: 4, MAJOR: 3, MINOR: 2, NIT: 1 };\n\nconst byKey = new Map();\nfor (const item of $input.all()) {\n  let payload;\n  try { payload = JSON.parse(item.json.stdout); } catch { continue; }\n  for (const line of String(payload.text || '').split('\\n')) {\n    const m = RE.exec(line);\n    if (!m) continue;\n    const sev = m[1].toUpperCase();\n    const loc = m[2] || '';\n    if ((sev === 'BLOCKER' || sev === 'CRITICAL') && !loc) continue;\n    const key = `${loc}|${(m[3] || '').slice(0, 60).toLowerCase()}`;\n    const prev = byKey.get(key);\n    if (prev) { prev.votes += 1; if (RANK[sev] > RANK[prev.severity]) prev.severity = sev; }\n    else byKey.set(key, { severity: sev, location: loc, detail: m[3].trim(), votes: 1, role: payload.role });\n  }\n}\n\nconst findings = [...byKey.values()].sort((a, b) => RANK[b.severity] - RANK[a.severity] || b.votes - a.votes);\nconst blockers = findings.filter(f => f.severity === 'BLOCKER' || f.severity === 'CRITICAL');\n\nconst body = [\n  '## Thẩm định tự động của Agent Fleet', '',\n  blockers.length ? `**${blockers.length} mục chặn merge.**` : '**Không có mục chặn merge.**', '',\n  '| Mức | Vị trí | Vấn đề | Đồng thuận |', '|---|---|---|---|',\n  ...findings.slice(0, 40).map(f => `| ${f.severity} | \\`${f.location || '—'}\\` | ${f.detail.replace(/\\|/g, '\\\\|').slice(0, 200)} | ${f.votes}/3 |`),\n  '', '_Ba model của ba nhà cung cấp khác nhau cùng soi diff này. Cột “đồng thuận” cho biết bao nhiêu model cùng nêu một vấn đề — mục 3/3 gần như chắc chắn là thật._',\n].join('\\n');\n\nreturn [{ json: { findings, blockerCount: blockers.length, body, state: blockers.length ? 'failure' : 'success' } }];"
+        "jsCode": "// Hợp nhất phát hiện bằng LUẬT, không bằng model.\n// Quy tắc \"bằng chứng hoặc im lặng\": BLOCKER không có file:dòng thì bị loại.\n// Mỗi item là JSON mà agent-runner trả về từ POST /run: { role, exit, text, status }.\nconst RE = /\\[?(BLOCKER|CRITICAL|MAJOR|MINOR|NIT)\\]?\\s*([\\w./-]+:\\d+)?\\s*[|:-]?\\s*(.+)/i;\nconst RANK = { CRITICAL: 5, BLOCKER: 4, MAJOR: 3, MINOR: 2, NIT: 1 };\n\nconst byKey = new Map();\nfor (const item of $input.all()) {\n  const payload = item.json || {};\n  for (const line of String(payload.text || '').split('\\n')) {\n    const m = RE.exec(line);\n    if (!m) continue;\n    const sev = m[1].toUpperCase();\n    const loc = m[2] || '';\n    if ((sev === 'BLOCKER' || sev === 'CRITICAL') && !loc) continue;\n    const key = `${loc}|${(m[3] || '').slice(0, 60).toLowerCase()}`;\n    const prev = byKey.get(key);\n    if (prev) { prev.votes += 1; if (RANK[sev] > RANK[prev.severity]) prev.severity = sev; }\n    else byKey.set(key, { severity: sev, location: loc, detail: m[3].trim(), votes: 1, role: payload.role });\n  }\n}\n\nconst findings = [...byKey.values()].sort((a, b) => RANK[b.severity] - RANK[a.severity] || b.votes - a.votes);\nconst blockers = findings.filter(f => f.severity === 'BLOCKER' || f.severity === 'CRITICAL');\n\nconst body = [\n  '## Thẩm định tự động của Agent Fleet', '',\n  blockers.length ? `**${blockers.length} mục chặn merge.**` : '**Không có mục chặn merge.**', '',\n  '| Mức | Vị trí | Vấn đề | Đồng thuận |', '|---|---|---|---|',\n  ...findings.slice(0, 40).map(f => `| ${f.severity} | \\`${f.location || '—'}\\` | ${f.detail.replace(/\\|/g, '\\\\|').slice(0, 200)} | ${f.votes}/3 |`),\n  '', '_Ba model của ba nhà cung cấp khác nhau cùng soi diff này. Cột “đồng thuận” cho biết bao nhiêu model cùng nêu một vấn đề — mục 3/3 gần như chắc chắn là thật._',\n].join('\\n');\n\nreturn [{ json: { findings, blockerCount: blockers.length, body, state: blockers.length ? 'failure' : 'success' } }];"
       },
       "id": "w-consolidate",
       "name": "Hợp nhất phát hiện (luật)",
@@ -150,13 +179,21 @@
     },
     {
       "parameters": {
-        "command": "=rm -rf \"{{ $('Lấy mã nguồn PR').item.json.stdout.trim() }}\""
+        "method": "POST",
+        "url": "={{ $env.AGENT_RUNNER_URL }}/pr/cleanup",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.AGENT_RUNNER_TOKEN }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ path: $('Lấy mã nguồn PR').item.json.path }) }}",
+        "options": { "timeout": 60000 }
       },
       "id": "w-cleanup",
       "name": "Dọn thư mục tạm",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [1040, 300]
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1040, 300],
+      "notes": "agent-runner chỉ xoá đúng dạng /srv/repos/pr-<số> — không xoá được đường dẫn nào khác."
     }
   ],
   "connections": {

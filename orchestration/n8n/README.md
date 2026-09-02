@@ -59,7 +59,15 @@ docker compose exec n8n n8n import:workflow --separate --input=/workflows
 docker compose exec n8n n8n export:workflow --all --separate --output=/workflows
 ```
 
-## Ba quy tắc bắt buộc khi viết workflow gọi agent
+## Bốn quy tắc bắt buộc khi viết workflow gọi agent
+
+0. **Không có node executeCommand.** Worker n8n không có acpx, và ghép dữ liệu
+   webhook vào chuỗi shell là chèn lệnh thật sự (`$( )` sống sót trong nháy kép).
+   Mọi lượt agent đi qua HTTP tới agent-runner:
+   `POST $AGENT_RUNNER_URL/run` với `{ role, cwd, prompt, write?, timeoutS? }`,
+   kèm `Authorization: Bearer $AGENT_RUNNER_TOKEN`. Clone PR dùng
+   `POST /pr/checkout { repo, pr }` và dọn bằng `POST /pr/cleanup { path }`.
+   `scripts/validate.sh` từ chối mọi workflow có executeCommand.
 
 1. **Kiểm quyền trước khi gọi model.** Một lượt agent tốn tiền thật; xác thực và
    phân quyền phải xong trước node đầu tiên chạm tới agent. Prompt có thể bị dẫn

@@ -311,6 +311,29 @@ docker compose exec agent-runner acpx claude sessions rm <tên-phiên>
 ```
 Timeout mặc định 30 phút. Treo thường xuyên = bước quá lớn, cần tách nhỏ.
 
+### n8n hoặc LangGraph báo `agent-runner trả 401` / `không gọi được agent-runner`
+
+Tầng thực thi là một dịch vụ HTTP (`execution-plane/runner/server.mjs`, cổng
+8787 trong mạng compose, không map ra host). Ba nguyên nhân theo thứ tự:
+
+| Triệu chứng | Nguyên nhân | Xử lý |
+|---|---|---|
+| container `agent-runner` thoát mã 78 | thiếu `AGENT_RUNNER_TOKEN` trong `.env` — runner từ chối khởi động (fail closed) | `openssl rand -hex 32` rồi điền, `make up` |
+| `401` | token phía gọi (n8n/LangGraph) khác token của runner | cả ba dịch vụ đọc cùng một biến `AGENT_RUNNER_TOKEN`; kiểm `.env` |
+| `429 runner đang bận` | quá `RUNNER_MAX_CONCURRENT` lượt song song | tăng `AGENT_RUNNER_REPLICAS` hoặc biến đó |
+| `400 cwd phải là thư mục có thật nằm trong /srv/repos` | gọi với thư mục ngoài kho repo | runner cố ý chỉ chạy trong `/srv/repos` |
+
+Kiểm nhanh: `docker compose exec agent-runner curl -s localhost:8787/healthz`.
+
+### LangGraph trả `403` khi duyệt (`/runs/<id>/resume`)
+
+Trường `by` không nằm trong `approvers` của hồ sơ gắn với thread (`profiles/<tên>.yaml`).
+Đây là chủ đích: token API chứng minh "n8n gọi", không chứng minh "người có
+thẩm quyền đã duyệt". Sửa danh sách `approvers` trong hồ sơ, không nới API.
+Mọi lần duyệt/từ chối (kể cả bị 403) đều ghi một dòng `permission.decision`
+ra log của container `langgraph`. `503` ở mọi endpoint nghĩa là thiếu
+`LANGGRAPH_TOKEN` — API đóng hoàn toàn cho tới khi có token.
+
 ### LangGraph mất trạng thái sau khi khởi động lại
 Kiểm tra `FLEET_CHECKPOINT_DSN` đã trỏ đúng PostgreSQL chưa. Nếu để trống,
 LangGraph chạy checkpoint trong bộ nhớ và **mọi lần chờ người duyệt sẽ mất** khi

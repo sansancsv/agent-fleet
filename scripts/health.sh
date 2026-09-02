@@ -52,6 +52,7 @@ wait_exec () {
 
 echo "Chờ các dịch vụ sẵn sàng (tối đa ${TIMEOUT}s mỗi dịch vụ):"
 wait_exec "mcporter bridge"   mcporter nc -z 127.0.0.1 7420
+wait_exec "agent-runner API"  agent-runner curl -fsS http://127.0.0.1:8787/healthz
 wait_http "OpenClaw gateway"  "http://127.0.0.1:${OPENCLAW_GATEWAY_PORT:-18789}/healthz"
 wait_http "LangGraph"         "http://127.0.0.1:${LANGGRAPH_PORT:-2024}/ok"
 wait_http "n8n"               "http://127.0.0.1:${N8N_PORT:-5678}/healthz"

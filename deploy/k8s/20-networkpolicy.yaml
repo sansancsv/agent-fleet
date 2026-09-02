@@ -52,3 +52,17 @@ spec:
         - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
           podSelector: { matchLabels: { k8s-app: kube-dns } }
       ports: [{ protocol: UDP, port: 53 }]
+---
+# Ai được GỌI VÀO agent-runner: chỉ tầng điều phối và gateway, đúng cổng API.
+# Token Bearer là lớp thứ hai; lớp thứ nhất là không ai khác tới được cổng này.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: agent-runner-ingress, namespace: fleet }
+spec:
+  podSelector: { matchLabels: { app: agent-runner } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { tier: orchestration } }
+        - podSelector: { matchLabels: { app: openclaw-gateway } }
+      ports: [{ protocol: TCP, port: 8787 }]

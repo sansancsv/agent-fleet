@@ -57,7 +57,9 @@ CI (`.github/workflows/fleet-ci.yml`) chạy đúng các bước: `scripts/valid
 
 Trên đó: **n8n** (`orchestration/n8n/`) cho quy trình nghiệp vụ liên phòng ban; **LangGraph** (`orchestration/langgraph/`) cho quy trình dài, checkpoint PostgreSQL, `interrupt()` chờ người duyệt; **acpx flow** (`execution-plane/flows/*.flow.ts`) cho quy trình sống trong repo. Ba cái xếp chồng, không thay thế nhau: n8n tiếp nhận → LangGraph chạy quy trình dài → acpx thực thi từng lượt agent.
 
-Luồng một yêu cầu: Slack → gateway tra `bindings.json` → agent `orchestrator` → LangGraph `graph.py` (`prepare` tạo worktree → `triage` → [`design` nếu risky] → `implement` → `cross_review` song song → `gate` → `approval` interrupt → `open_pr`) → mỗi lượt agent gọi `acpx <backend> exec` qua `acpx_client.run_role` → mọi truy cập ra ngoài đi qua **một** cầu nối mcporter (`http://mcporter:7420/mcp`).
+Luồng một yêu cầu: Slack → gateway tra `bindings.json` → agent `orchestrator` → LangGraph `graph.py` (`prepare` tạo worktree → `triage` → [`design` nếu risky] → `implement` → `cross_review` song song → `gate` → `approval` interrupt → `open_pr`) → mỗi lượt agent đi qua `acpx_client.run_role` → **dịch vụ agent-runner** (`execution-plane/runner/server.mjs`, `POST /run`, Bearer `AGENT_RUNNER_TOKEN`) spawn `run-role.sh` → `acpx <backend> exec` → mọi truy cập ra ngoài đi qua **một** cầu nối mcporter (`http://mcporter:7420/mcp`).
+
+Tầng thực thi là dịch vụ HTTP, không phải container để `docker exec`. n8n gọi `POST /run`, `POST /pr/checkout`, `POST /pr/cleanup` bằng node httpRequest; `validate.sh` cấm node executeCommand trong `orchestration/n8n/workflows/`. Không đặt `AGENT_RUNNER_URL` thì `run_role` spawn acpx tại chỗ (dev/test). Prompt luôn đi qua argv của spawn hoặc JSON body, không bao giờ qua chuỗi shell.
 
 ### Nguyên tắc thiết kế cần giữ khi sửa
 
@@ -88,6 +90,8 @@ Thêm phòng ban = thêm `profiles/<tên>.yaml` (schema ở `profiles/_schema.ya
 
 `server.py` là FastAPI tự viết (không dùng `langgraph up` — CLI không có trong gói `langgraph` và `langgraph up` dựng Compose). Endpoint n8n phụ thuộc: `POST /runs/wait`, `POST /runs/{thread_id}/resume`, `GET /runs/{thread_id}`, `GET /profiles/{name}/authorize`, `GET /ok`. Đổi tên/hình dạng các endpoint này phải sửa cả `orchestration/n8n/workflows/*.json` và `tests/test_server.py`.
 
+Hai chốt fail-closed trong `server.py`: mọi endpoint trừ `/ok` đòi `Authorization: Bearer $LANGGRAPH_TOKEN` (thiếu biến → 503 cho tất cả); `/runs/{id}/resume` chỉ chấp nhận `by` nằm trong `approvers` của hồ sơ gắn với thread (`profile` trong state, mặc định `engineering`), nếu không → 403 và ghi `permission.decision` ra stdout.
+
 ## Bẫy cấu hình đã trả giá (đối chiếu OpenClaw 2026.8.1, mcporter 0.13.8)
 
 Phần lớn được `scripts/validate.sh` và `scripts/check-oc-placeholders.py` bắt; đọc trước khi sửa để không phải đi vòng.
@@ -114,4 +118,4 @@ Phần lớn được `scripts/validate.sh` và `scripts/check-oc-placeholders.p
 
 - Trên WSL, đặt repo trên filesystem Linux (`~/agent-fleet`), không phải `/mnt/c`: mất bit `+x`, `.env` không giữ được 600, I/O chậm. Compose gọi script qua `bash <path>` để chịu được mất `+x`.
 - Các file `*:Zone.Identifier` là rác do Windows sinh khi tải file; không tạo thêm, không tham chiếu.
-- `.env` không commit; `bootstrap.sh` sinh khoá nội bộ, người dùng tự điền `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`.
+- `.env` không commit; `bootstrap.sh` sinh khoá nội bộ (gồm `LANGGRAPH_TOKEN`, `AGENT_RUNNER_TOKEN`, cả hai bắt buộc), người dùng tự điền `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`.

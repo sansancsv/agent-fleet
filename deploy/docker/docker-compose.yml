@@ -179,15 +179,23 @@ services:
   # ---------------------------------------------------------------------------
   # TẦNG THỰC THI — acpx + các backend agent (nhân bản được)
   # ---------------------------------------------------------------------------
+  # Là một DỊCH VỤ HTTP (execution-plane/runner/server.mjs), không phải container
+  # ngủ chờ `docker exec`. n8n và LangGraph gọi POST /run; dữ liệu ngoài đi vào
+  # argv qua spawn() — không có shell nào diễn giải nó. Cổng 8787 KHÔNG map ra
+  # host: chỉ các container trong mạng compose gọi tới, kèm Bearer token.
   agent-runner:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.agent-runner
     restart: unless-stopped
+    command: ["node", "/fleet/execution-plane/runner/server.mjs"]
     depends_on:
       mcporter: { condition: service_healthy }
     environment:
       <<: *common-env
+      RUNNER_PORT: "8787"
+      RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN:?bắt buộc — sinh bằng openssl rand -hex 32}
+      RUNNER_MAX_CONCURRENT: "4"
       MCPORTER_BRIDGE_URL: http://mcporter:7420/mcp
       ACPX_AUTH_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ACPX_AUTH_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -203,6 +211,12 @@ services:
       - repos:/srv/repos
       - acpx-state:/home/node/.acpx
       - fleet-logs:/var/log/fleet
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8787/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
     deploy:
       replicas: ${AGENT_RUNNER_REPLICAS:-2}
       resources:
@@ -219,12 +233,18 @@ services:
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
-      agent-runner: { condition: service_started }
+      agent-runner: { condition: service_healthy }
     environment:
       <<: *common-env
+      # API từ chối mọi yêu cầu nếu thiếu token (fail closed) — xem server.py.
+      LANGGRAPH_TOKEN: ${LANGGRAPH_TOKEN:?bắt buộc — sinh bằng openssl rand -hex 32}
       FLEET_CHECKPOINT_DSN: postgresql://${PG_USER:-fleet}:${PG_PASSWORD}@postgres:5432/fleet_checkpoints
       FLEET_REPO_ROOT: /srv/repos
       FLEET_PROFILES_DIR: /fleet/profiles
+      # Có AGENT_RUNNER_URL → mọi lượt agent đi qua dịch vụ agent-runner thay vì
+      # chạy acpx ngay trong container này. Một chỗ chạy, một chỗ ghi log.
+      AGENT_RUNNER_URL: http://agent-runner:8787
+      AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN}
       MCPORTER_BRIDGE_URL: http://mcporter:7420/mcp
       ACPX_AUTH_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ACPX_AUTH_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -277,8 +297,11 @@ services:
       OPENCLAW_GATEWAY_URL: http://openclaw-gateway:18789
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
       LANGGRAPH_URL: http://langgraph:8000
-      LANGGRAPH_TOKEN: ${LANGGRAPH_TOKEN:-}
-      FLEET_PROFILE_API: http://langgraph:8000
+      LANGGRAPH_TOKEN: ${LANGGRAPH_TOKEN}
+      # Workflow gọi agent qua HTTP (POST /run) — KHÔNG dùng node executeCommand.
+      # validate.sh cấm executeCommand trong orchestration/n8n/workflows/.
+      AGENT_RUNNER_URL: http://agent-runner:8787
+      AGENT_RUNNER_TOKEN: ${AGENT_RUNNER_TOKEN}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     ports:
       - "127.0.0.1:${N8N_PORT:-5678}:5678"
@@ -302,11 +325,10 @@ services:
     depends_on:
       n8n: { condition: service_started }
     environment: *n8n-env
+    # Cố ý KHÔNG mount execution-plane hay kho repo: worker không chạy agent,
+    # nó gọi agent-runner qua HTTP. Image n8n cũng không có acpx/python3.
     volumes:
       - n8ndata:/home/node/.n8n
-      - ../../execution-plane:/fleet/execution-plane:ro
-      - repos:/srv/repos
-      - fleet-logs:/var/log/fleet
     deploy:
       replicas: ${N8N_WORKER_REPLICAS:-2}
     logging: *logging

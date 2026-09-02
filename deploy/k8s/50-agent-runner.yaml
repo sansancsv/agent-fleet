@@ -27,8 +27,21 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }
-          command: ["sleep", "infinity"]
+          # Dịch vụ HTTP của tầng thực thi — xem execution-plane/runner/server.mjs.
+          # LangGraph gọi POST /run vào đây; không ai `kubectl exec` vào pod này.
+          command: ["node", "/fleet/execution-plane/runner/server.mjs"]
+          ports: [{ name: http, containerPort: 8787 }]
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
           env:
+            - { name: RUNNER_PORT, value: "8787" }
+            - { name: RUNNER_MAX_CONCURRENT, value: "4" }
+            - name: RUNNER_TOKEN
+              valueFrom: { secretKeyRef: { name: fleet-service-tokens, key: AGENT_RUNNER_TOKEN } }
             - { name: MCPORTER_BRIDGE_URL, value: "http://mcporter:7420/mcp" }
             - { name: FLEET_REPO_ROOT, value: /srv/repos }
             - { name: FLEET_LOG_DIR, value: /var/log/fleet }
@@ -53,6 +66,13 @@ spec:
         - { name: repos, persistentVolumeClaim: { claimName: fleet-repos } }
         - { name: logs,  emptyDir: { sizeLimit: 5Gi } }
         - { name: tmp,   emptyDir: { sizeLimit: 10Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: agent-runner, namespace: fleet }
+spec:
+  selector: { app: agent-runner }
+  ports: [{ name: http, port: 8787, targetPort: http }]
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

@@ -54,7 +54,7 @@ else
   cp .env.example .env
   gen () { openssl rand -hex 32; }
   for KEY in OPENCLAW_GATEWAY_TOKEN MCPORTER_BRIDGE_TOKEN HOOK_SECRET_N8N \
-             HOOK_SECRET_GITHUB HOOK_TOKEN_ALERTS LANGGRAPH_TOKEN \
+             HOOK_SECRET_GITHUB HOOK_TOKEN_ALERTS LANGGRAPH_TOKEN AGENT_RUNNER_TOKEN \
              N8N_ENCRYPTION_KEY PG_PASSWORD; do
     V=$(gen); sed -i.bak "s|^${KEY}=.*|${KEY}=${V}|" .env && rm -f .env.bak
   done

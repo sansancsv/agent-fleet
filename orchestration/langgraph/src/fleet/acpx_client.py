@@ -9,6 +9,12 @@ Vì sao không gọi thẳng API model trong LangGraph?
 
 Nhờ vậy đổi backend (Claude ↔ Codex ↔ model tự host) là đổi một dòng cấu hình,
 không phải viết lại đồ thị.
+
+Hai chế độ chạy, chọn bằng biến môi trường:
+    AGENT_RUNNER_URL đặt   → gọi HTTP tới dịch vụ agent-runner (compose/K8s).
+                             Mọi lượt agent của cả fleet đi qua một chỗ.
+    AGENT_RUNNER_URL trống → spawn acpx ngay trong tiến trình này (dev, test).
+Cả hai đều truyền prompt bằng argv/JSON — không có shell nào diễn giải nó.
 """
 
 from __future__ import annotations
@@ -17,6 +23,8 @@ import asyncio
 import json
 import os
 import shlex
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -78,6 +86,14 @@ async def run_role(
     backend, default_perm = ROLE_BACKENDS[role]
     perm = permission or default_perm
 
+    runner_url = os.environ.get("AGENT_RUNNER_URL", "").rstrip("/")
+    if runner_url:
+        if session:
+            raise AcpxError("Phiên có trạng thái chưa được hỗ trợ qua agent-runner API")
+        return await asyncio.to_thread(
+            _run_remote, runner_url, role, prompt, cwd, perm == "approve-all", timeout_s
+        )
+
     argv: list[str] = ["acpx", backend]
     if session:
         # Phiên có trạng thái: agent nhớ ngữ cảnh repo giữa các lượt.
@@ -136,6 +152,43 @@ async def fanout(
         else:
             out.append(res)
     return out
+
+
+def _run_remote(
+    base_url: str, role: str, prompt: str, cwd: str, write: bool, timeout_s: int
+) -> AgentResult:
+    """Gọi POST /run của agent-runner. Chạy trong thread vì urllib chặn."""
+    token = os.environ.get("AGENT_RUNNER_TOKEN", "")
+    if not token:
+        raise AcpxError("AGENT_RUNNER_TOKEN chưa đặt — không gọi được agent-runner")
+
+    body = json.dumps(
+        {"role": role, "cwd": cwd, "prompt": prompt, "write": write, "timeoutS": timeout_s},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base_url}/run",
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+    )
+    try:
+        # +30s: runner tự cắt ở timeout_s và trả 504; ta chỉ là lớp bảo hiểm.
+        with urllib.request.urlopen(req, timeout=timeout_s + 30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:800]
+        raise AcpxError(f"{role}: agent-runner trả {exc.code}: {detail}") from None
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise AcpxError(f"{role}: không gọi được agent-runner tại {base_url}: {exc}") from None
+
+    text = str(payload.get("text", ""))
+    return AgentResult(
+        role=role,
+        text=text,
+        exit_code=int(payload.get("exit", 0) or 0),
+        status=payload.get("status") or _extract_status(text),
+    )
 
 
 def _extract_text(ndjson: str) -> str:
