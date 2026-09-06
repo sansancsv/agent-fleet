@@ -7,7 +7,8 @@
 | Hằng ngày | Xem sức khoẻ dịch vụ | `make health` |
 | Hằng ngày | Xem chi phí theo phòng ban | dashboard chi phí |
 | Hằng tuần | Rà nhật ký kiểm toán tìm hành vi bất thường | truy vấn Loki |
-| Hằng tuần | Xem tỉ lệ leo thang (agent bó tay) | báo cáo LangGraph |
+| Hằng tuần | Xem tỉ lệ leo thang (agent bó tay) | `make metrics D=7` |
+| Hằng tuần | Xem bài học fleet đã tích luỹ, xoá bài sai | `make memory` |
 | Hằng tháng | Rà quyền: vai trò nào có quyền không dùng đến | `make audit` |
 | Hằng tháng | Cập nhật ảnh, quét lỗ hổng | CI |
 | Hằng quý | Diễn tập xoay vòng khoá | thủ công |
@@ -27,6 +28,45 @@ thật. Nếu hầu hết mục chỉ 1/3, tiêu chí thẩm định đang quá 
 
 **4. Chi phí trên mỗi công việc hoàn thành.** Chỉ số duy nhất nói được fleet có
 đáng tiền không. Tính theo *công việc hoàn thành*, không theo *lượt gọi*.
+
+### Lấy số ở đâu
+
+`make metrics` (hoặc `GET /metrics` kèm token) đọc vết chạy trong
+`FLEET_TRAJECTORY_DIR` và in bảng bốn chỉ số của mục 3.8 trong
+`tien-hoa-agentic-patterns-vi.md`. Hai điều cần biết trước khi đọc bảng:
+
+- **Chi phí token trả về `null`, không phải 0.** acpx chưa phơi số token nên
+  chưa đo được; bảng báo các đại lượng thay thế (số lượt agent, thời gian, ký
+  tự đầu ra) và nói rõ vì sao thiếu. Xem điều kiện xem lại trong
+  `docs/adr/0001` — proxy model là chỗ tự nhiên để đếm token.
+- **Chưa có dữ liệu khác 0%.** Mọi tỉ lệ trả `null` khi mẫu số bằng 0. Nếu thấy
+  "chưa có dữ liệu" ngay sau khi fleet đã chạy, kiểm `FLEET_TRAJECTORY_DIR` có
+  được mount không.
+
+Mục "Phát hiện lặp lại nhiều nhất" ở cuối báo cáo là danh sách việc cần làm:
+mỗi dòng là một ràng buộc còn thiếu trong `_shared/AGENTS.md`. Thêm ràng buộc
+rồi tuần sau xem dòng đó có biến mất không — đó chính là cách kiểm chứng vòng
+lặp Hashimoto.
+
+---
+
+## Bộ nhớ của fleet
+
+Bộ nhớ nằm ở `FLEET_MEMORY_DIR` (volume `fleet-memory`), do **container
+langgraph ghi**, agent-runner không mount. Markdown thuần, sửa tay được:
+
+```bash
+make memory                                    # mục lục
+$(COMPOSE) exec -T langgraph cat /srv/fleet-memory/repos/<repo>.md
+```
+
+**Khi nào phải can thiệp tay:** một bài học sai được ghi vào sẽ được nạp vào
+MỌI lượt agent của repo đó cho tới khi bị đẩy ra khỏi trần 50 bài. Thấy bài học
+sai thì xoá dòng đó ngay, đừng chờ nó tự trôi.
+
+Mọi thứ ở đây đều có trần (`MAX_LESSONS`, `MAX_PROGRESS_LINES`,
+`MAX_INJECT_CHARS`). Nếu volume này đầy thì nghĩa là có trần bị gỡ ở đâu đó,
+không phải cần thêm đĩa.
 
 ---
 

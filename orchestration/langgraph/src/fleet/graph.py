@@ -26,13 +26,15 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+import time
 from typing import Literal
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-from .acpx_client import fanout, run_role
+from . import memory, trajectory
+from .acpx_client import AgentResult, fanout, run_role
 from .policies import parse_findings, risk_from_text
 from .state import FleetState, blockers, initial_state
 
@@ -60,6 +62,58 @@ WORKTREE_OWNER_GID = int(os.environ.get("FLEET_WORKTREE_GID", "1000"))
 
 
 # ---------------------------------------------------------------------------
+# BỘ NHỚ VÀ VẾT CHẠY — hai móc dùng chung cho mọi nút có gọi model
+# ---------------------------------------------------------------------------
+def _memory_prefix(state: FleetState) -> str:
+    """Ghi chú của các lượt trước, nạp vào đầu prompt.
+
+    Trả về "" khi chưa có gì — không nạp khối rỗng chỉ để cho có. Nội dung đã
+    được `memory.context_block` bọc trong thẻ và ghi rõ là dữ liệu tham khảo.
+    """
+    return memory.context_block(state.get("repo", ""), state.get("task_id", ""))
+
+
+def _after_turn(
+    state: FleetState,
+    node: str,
+    res: AgentResult,
+    *,
+    blocker_sigs: list[str] | None = None,
+) -> None:
+    """Chạy sau MỖI lượt agent: ghi tiến độ, ghi vết chạy, thu bài học.
+
+    Đây là chỗ vòng lặp Hashimoto khép lại. Agent chỉ *nêu* bài học qua trường
+    `lesson:` trong khối fleet-status; hàm này *quyết định* có ghi hay không.
+    Nếu để agent tự ghi file bộ nhớ thì (a) mất tính xác định, (b) bộ nhớ thành
+    nơi agent tự cấp thêm chỉ dẫn cho chính mình ở lượt sau.
+
+    Hàm này không bao giờ được ném lỗi: quan sát hỏng không làm hỏng công việc.
+    """
+    task_id = state.get("task_id", "")
+    note = f"{res.outcome}"
+    if res.status.get("confidence"):
+        note += f" (tin cậy {res.status['confidence']})"
+
+    memory.append_step(task_id, node, note)
+    trajectory.step(
+        task_id,
+        node,
+        role=res.role,
+        outcome=res.outcome,
+        duration_ms=res.duration_ms,
+        output_chars=len(res.text),
+        revision_count=state.get("revision_count", 0),
+        risk=state.get("risk", ""),
+        blockers=blocker_sigs,
+    )
+
+    lesson = res.status.get("lesson", "")
+    if lesson and memory.record_lesson(state.get("repo", ""), lesson, task_id=task_id):
+        trajectory.step(task_id, f"{node}:lesson", role=res.role, outcome="recorded",
+                        note=lesson)
+
+
+# ---------------------------------------------------------------------------
 # NÚT 1 — Chuẩn bị. Xác định thuần tuý, không có model tham gia.
 # ---------------------------------------------------------------------------
 async def prepare(state: FleetState) -> dict:
@@ -78,7 +132,20 @@ async def prepare(state: FleetState) -> dict:
     owner = f"{WORKTREE_OWNER_UID}:{WORKTREE_OWNER_GID}"
     subprocess.run(["chown", "-R", owner, repo], check=True)
     subprocess.run(["chown", "-R", owner, worktree], check=True)
-    return {"branch": branch, "worktree": worktree}
+
+    # Mở file tiến độ và ghi mốc bắt đầu. Tương ứng "initializer agent" trong
+    # pattern long-running agent của Anthropic, nhưng làm bằng code — không tốn
+    # một lượt model chỉ để viết header.
+    memory.start_task(state["task_id"], state.get("title", ""), repo, branch)
+    trajectory.run_started(state["task_id"], repo=repo, profile=state.get("profile", ""),
+                           title=state.get("title", ""))
+
+    return {
+        "branch": branch,
+        "worktree": worktree,
+        # Ghi lại nếu bên gọi chưa đặt (ví dụ resume một thread cũ chưa có trường này).
+        "started_at": state.get("started_at") or time.time(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +163,7 @@ async def triage(state: FleetState) -> dict:
         cwd=state["worktree"],
         permission="deny-all",
     )
+    _after_turn(state, "triage", res)
     return {"risk": risk_from_text(res.text), "transcripts": [{"node": "triage", "text": res.text}]}
 
 
@@ -105,12 +173,14 @@ async def triage(state: FleetState) -> dict:
 async def design(state: FleetState) -> dict:
     res = await run_role(
         "architect",
-        f"Viết ADR cho {state['task_id']}: {state['title']}.\n"
+        _memory_prefix(state)
+        + f"Viết ADR cho {state['task_id']}: {state['title']}.\n"
         "Ghi vào docs/adr/ theo khuôn mẫu fleet-adr. Tối thiểu 2 phương án và "
         "phải nêu chi phí đảo ngược. KHÔNG viết code.",
         cwd=state["worktree"],
         permission="approve-all",
     )
+    _after_turn(state, "design", res)
     return {"transcripts": [{"node": "design", "text": res.text}]}
 
 
@@ -130,13 +200,15 @@ async def implement(state: FleetState) -> dict:
 
     res = await run_role(
         "implementer",
-        f"Hiện thực {state['task_id']}: {state['title']}\n\n"
+        _memory_prefix(state)
+        + f"Hiện thực {state['task_id']}: {state['title']}\n\n"
         "Bắt buộc: đọc code trước khi sửa; thay đổi tối thiểu; chạy 'make test lint' "
         "cho tới khi xanh; commit theo Conventional Commits; KHÔNG push." + feedback,
         cwd=state["worktree"],
         permission="approve-all",
         timeout_s=2700,
     )
+    _after_turn(state, "implement", res)
     return {
         "transcripts": [{"node": "implement", "text": res.text}],
         "revision_count": state.get("revision_count", 0) + (1 if feedback else 0),
@@ -155,13 +227,26 @@ async def cross_review(state: FleetState) -> dict:
         "Mức: BLOCKER | CRITICAL | MAJOR | MINOR | NIT.\n"
         "Không có kịch bản hỏng cụ thể thì không phải phát hiện — đừng bịa."
     )
-    results = await fanout(roles, prompt, cwd=state["worktree"])
+    results = await fanout(roles, _memory_prefix(state) + prompt, cwd=state["worktree"])
 
     findings = []
     transcripts = []
     for r in results:
-        findings.extend(parse_findings(r.role, r.text))
+        mine = parse_findings(r.role, r.text)
+        findings.extend(mine)
         transcripts.append({"node": f"review:{r.role}", "text": r.text})
+        # Chỉ ghi CHỮ KÝ (mức|file) vào vết chạy, không ghi nội dung phát hiện:
+        # đủ để đếm lỗi lặp lại, không đủ để rò mã nguồn ra hệ thống log.
+        _after_turn(
+            state,
+            f"review:{r.role}",
+            r,
+            blocker_sigs=[
+                trajectory.finding_signature(f["severity"], f["location"])
+                for f in mine
+                if f["severity"] in ("BLOCKER", "CRITICAL")
+            ],
+        )
     return {"findings": findings, "transcripts": transcripts}
 
 
@@ -195,11 +280,17 @@ def human_approval(state: FleetState) -> Command:
             "question": "Duyệt mở pull request?",
         }
     )
-    if decision.get("approved"):
+    approved = bool(decision.get("approved"))
+    by = decision.get("by", "unknown")
+    trajectory.approval(state.get("task_id", ""), by=by, approved=approved,
+                        profile=state.get("profile", ""))
+    memory.append_step(state.get("task_id", ""), "approval",
+                       f"{'duyệt' if approved else 'từ chối'} bởi {by}")
+
+    if approved:
         return Command(
             goto="open_pr",
-            update={"approved_by": decision.get("by", "unknown"),
-                    "approval_note": decision.get("note", "")},
+            update={"approved_by": by, "approval_note": decision.get("note", "")},
         )
     return Command(goto="finish", update={"outcome": "rejected",
                                           "approval_note": decision.get("note", "")})
@@ -226,7 +317,13 @@ async def open_pr(state: FleetState) -> dict:
 def escalate(state: FleetState) -> dict:
     items = "\n".join(f"- [{f['severity']}] {f['location']}: {f['detail']}"
                       for f in blockers(state))
+    # Leo thang là tín hiệu quan trọng nhất cho việc cải tiến harness: nó nói
+    # đúng chỗ tự động hoá hết cách. Ghi riêng để `make metrics` đếm được.
+    memory.append_step(state.get("task_id", ""), "escalate",
+                       f"còn {len(blockers(state))} mục chặn sau "
+                       f"{state.get('revision_count', 0)} lượt sửa")
     return {
+        "escalated": True,
         "outcome": "blocked",
         "summary": (
             f"Đã sửa {state.get('revision_count')} lượt, vẫn còn "
@@ -237,6 +334,29 @@ def escalate(state: FleetState) -> dict:
 
 
 def finish(state: FleetState) -> dict:
+    """Nút cuối cùng của MỌI nhánh — nơi duy nhất đóng sổ vết chạy.
+
+    Đặt `run_finished` ở đây chứ không rải ra open_pr/escalate/rejected: một
+    quy trình phải sinh ĐÚNG MỘT bản ghi run.end, nếu không mọi tỉ lệ trong
+    fleet.metrics đều sai mẫu số.
+    """
+    task_id = state.get("task_id", "")
+    started = float(state.get("started_at") or 0)
+    duration_s = max(time.time() - started, 0.0) if started else 0.0
+
+    trajectory.run_finished(
+        task_id,
+        outcome=str(state.get("outcome") or "partial"),
+        duration_s=duration_s,
+        repo=state.get("repo", ""),
+        approved_by=state.get("approved_by", ""),
+        revision_count=state.get("revision_count", 0),
+        escalated=bool(state.get("escalated")),
+        pr_url=state.get("pr_url", ""),
+    )
+    memory.append_step(task_id, "finish",
+                       f"{state.get('outcome')} sau {round(duration_s)}s")
+
     return {"summary": state.get("summary") or f"Kết thúc với trạng thái: {state.get('outcome')}"}
 
 

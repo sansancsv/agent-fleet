@@ -13,6 +13,7 @@ LangGraph ghi nó xuống checkpointer (PostgreSQL) sau mỗi bước. Nhờ đ�
 from __future__ import annotations
 
 import operator
+import time
 from typing import Annotated, Literal, TypedDict
 
 Risk = Literal["trivial", "standard", "risky"]
@@ -39,6 +40,11 @@ class FleetState(TypedDict, total=False):
     branch: str
     risk: Risk
 
+    # Mốc bắt đầu (epoch giây). Dùng để tính "phiên dài" trong fleet.metrics —
+    # phải nằm trong state chứ không phải biến cục bộ, vì quy trình có thể ngủ
+    # hàng ngày ở điểm chờ duyệt rồi mới chạy tiếp trong một tiến trình khác.
+    started_at: float
+
     # `operator.add` = các nút chạy song song được phép cùng ghi thêm vào danh sách
     # mà không giẫm lên nhau. Đây là lý do dùng Annotated thay vì list thường.
     transcripts: Annotated[list[dict], operator.add]
@@ -53,6 +59,7 @@ class FleetState(TypedDict, total=False):
     approval_note: str
 
     # --- Kết quả -------------------------------------------------------------
+    escalated: bool        # đã hết lượt sửa mà vẫn còn mục chặn → chuyển cho người
     outcome: Outcome
     pr_url: str
     summary: str
@@ -66,6 +73,7 @@ def initial_state(**kwargs) -> FleetState:
         "revision_count": 0,
         "max_revisions": 2,
         "outcome": "partial",
+        "started_at": time.time(),
     }
     base.update(kwargs)  # type: ignore[typeddict-item]
     return base

@@ -24,6 +24,8 @@ make logs S=<service>       # openclaw-gateway | mcporter | agent-runner | langg
 make restart-gateway        # sau khi sửa control-plane/ (chạy oc-validate trước)
 
 make test                   # pytest cho orchestration/langgraph
+make metrics D=7            # bốn chỉ số vận hành từ vết chạy (mục 3.8 tài liệu tham chiếu)
+make memory                 # mục lục bộ nhớ mà agent đọc ở mỗi lượt
 make audit                  # openclaw security audit (trong container) + opa test policy/opa/ -v
 opa test policy/opa/ -v     # chỉ test chính sách OPA
 
@@ -80,6 +82,10 @@ Tầng thực thi là dịch vụ HTTP, không phải container để `docker ex
 - **BLOCKER/CRITICAL không có `file:dòng` thì không phải phát hiện** (bị `parse_findings` loại). Mọi agent phải kết thúc bằng khối ```` ```fleet-status ```` (xem `_shared/AGENTS.md`); `run-role.sh` và `acpx_client._extract_status` phân tích khối này.
 - **Reviewer phải khác NHÀ CUNG CẤP với implementer** (Claude viết, Codex/Gemini chấm). `validate.sh` bước 8 cưỡng chế cho mọi profile.
 - **Mọi vòng lặp có giới hạn** (`max_revisions`, `limits.maxStepRuns`); hết lượt thì leo thang cho người, không thử tiếp.
+- **Bộ nhớ và vết chạy fail-soft.** `fleet/memory.py` và `fleet/trajectory.py` nuốt mọi lỗi I/O có chủ đích: volume hỏng thì mất bộ nhớ/số liệu, KHÔNG được làm hỏng một lượt giao hàng tính năng. Đừng thêm `raise` vào hai module này.
+- **Mọi thứ trong bộ nhớ đều có trần** (`MAX_LESSONS`, `MAX_PROGRESS_LINES`, `MAX_INJECT_CHARS`). Bộ nhớ không trần sẽ lặng lẽ ăn hết cửa sổ ngữ cảnh của mọi lượt gọi.
+- **Agent chỉ *nêu* bài học, code *quyết định* ghi.** Trường `lesson:` trong khối `fleet-status`; `graph._after_turn` gọi `memory.record_lesson`. Không cho agent tự ghi file bộ nhớ — nó sẽ thành nơi agent tự cấp chỉ dẫn cho chính mình ở lượt sau.
+- **Khoá model được thu hẹp theo backend** ở `run-role.sh` và `acpx_client.provider_env()`; hai nơi phải khớp, `validate.sh` bước 5d kiểm. Xem `docs/adr/0001` trước khi sửa.
 - **Dữ liệu ngoài bọc trong `<untrusted source="...">`** khi đưa vào prompt.
 - **Một quyền bị chặn ở ít nhất hai tầng**: OpenClaw `tools.deny`, cờ acpx (`--deny-all`/`--approve-reads`/`--approve-all`), mcporter `allowedTools`, OPA rego, K8s RBAC.
 
@@ -98,6 +104,20 @@ Chỉ mục 1↔2 được script kiểm tự động; 3–5 phải tự soát.
 ### Cơ chế mở rộng phòng ban
 
 Thêm phòng ban = thêm `profiles/<tên>.yaml` (schema ở `profiles/_schema.yaml`) + `capability-plane/packs/<capabilityPack>.json`. Không sửa code: `dept-request.flow.ts` và `server.py` (`GET /profiles/<tên>/authorize`) đọc profile lúc chạy. `validate.sh` kiểm profile trỏ tới pack có thật và drafter ≠ reviewer (trừ `dataClass: restricted`). `dataClass` quyết định backend được phép (`policies.MODEL_POLICY`, `model-routing.yaml`, `fleet.rego` — ba nơi phải khớp).
+
+### Bộ nhớ, vết chạy, chỉ số (thêm 09/2026)
+
+Ba module nhỏ trong `orchestration/langgraph/src/fleet/`, tất cả chỉ do container `langgraph` ghi (agent-runner không mount) nên không có tranh chấp quyền volume giữa hai image:
+
+| Module | Ghi ở đâu | Trả lời câu hỏi |
+|---|---|---|
+| `memory.py` | `FLEET_MEMORY_DIR` (volume `fleet-memory`) | "lần trước đụng repo này đã học được gì" — `MEMORY.md` mục lục, `repos/<slug>.md` bài học, `tasks/<id>.md` tiến độ |
+| `trajectory.py` | `FLEET_TRAJECTORY_DIR`, NDJSON một file một ngày | "quy trình hỏng ở nút nào, lỗi nào lặp lại" |
+| `metrics.py` | không ghi — đọc vết chạy | bốn chỉ số ở mục 3.8 của `tien-hoa-agentic-patterns-vi.md`; `GET /metrics`, `python -m fleet.metrics` |
+
+Phân biệt phải giữ: **checkpointer là state của một luồng; memory là tri thức giữa các luồng.** Đừng nhét bài học vào `FleetState` và đừng dùng checkpointer làm bộ nhớ.
+
+Chi phí token trong `metrics.py` cố ý trả `None` kèm lý do, không quy đổi từ số ký tự. Khi acpx phơi số token thì sửa `trajectory.step()` để ghi thêm.
 
 ### API LangGraph mà n8n gọi
 

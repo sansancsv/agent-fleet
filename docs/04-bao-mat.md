@@ -39,6 +39,23 @@ tả người đọc được). Rego, cờ acpx trong `run-role.sh` và `ROLE_BA
 `acpx_client.py` phải tự soát khi đổi vai trò. Với `reviewer` hôm nay, hai tầng
 thật sự giữ là 1 và 2.
 
+### Khoá model: một rủi ro CHƯA đóng
+
+Vai trò `implementer` và `tester` chạy với `--approve-all`, tức là agent chạy
+được lệnh shell tuỳ ý. acpx truyền môi trường của nó xuống mọi tiến trình con,
+nên các lệnh đó **nhìn thấy khoá model có trong container `agent-runner`**. Một
+lần chèn lệnh thành công là đọc được khoá.
+
+Giảm thiểu hiện có: `run-role.sh` và `acpx_client.provider_env()` gỡ khoá của
+những nhà cung cấp không phải backend của vai trò đang chạy — bán kính thiệt
+hại hạ từ ba nhà cung cấp xuống một. `validate.sh` bước 5d canh cho phần này
+không bị gỡ mất.
+
+**Đây là giảm thiểu, không phải bản vá.** Lượt `implementer` vẫn đọc được khoá
+Anthropic. Đích đến là proxy model giữ khoá riêng; điều kiện kích hoạt ghi ở
+`docs/adr/0001-tach-khoa-model-khoi-container-chay-code.md`. Đừng đọc mục này
+như một vấn đề đã xử lý xong.
+
 ---
 
 ## 3. Chống chèn lệnh qua prompt
@@ -100,7 +117,7 @@ phút; điều tra mất 5 giờ và trong 5 giờ đó khoá vẫn dùng đư�
 
 ## 5. Nhật ký kiểm toán
 
-Hiện có bốn nguồn, mỗi nguồn một nơi:
+Hiện có năm nguồn, mỗi nguồn một nơi:
 
 | Nguồn | Cấu hình / mã | Ghi ở đâu | Nội dung |
 |---|---|---|---|
@@ -108,6 +125,13 @@ Hiện có bốn nguồn, mỗi nguồn một nơi:
 | LangGraph | `server.py::_audit` | stdout container `langgraph` | `permission.decision`: ai duyệt/từ chối thread nào, được chấp nhận hay bị 403 |
 | agent-runner | `runner/server.mjs::log` | stdout container `agent-runner` | mỗi lượt: route, role, mã HTTP, thời gian |
 | n8n | node "Ghi nhật ký kiểm toán" trong workflow 01 | **chỉ trong execution data của n8n** | requestId, requester, profile, nhánh |
+| Vết chạy | `fleet/trajectory.py` | volume `fleet-memory` + stdout `langgraph` | mỗi nút: thời gian, kết quả, số vòng sửa, **chữ ký** phát hiện |
+
+Bốn nguồn đầu trả lời câu hỏi **kiểm toán** ("ai làm gì"). Nguồn thứ năm trả lời
+câu hỏi **kỹ thuật** ("quy trình hỏng ở nút nào, lỗi nào lặp lại") — đó là hai
+việc khác nhau và cố ý không gộp. Vết chạy chỉ ghi **chữ ký** phát hiện
+(`MỨC|tên-file`), không ghi nội dung phát hiện: đủ để đếm lỗi lặp lại, không đủ
+để rò mã nguồn ra hệ thống log tập trung.
 
 Ba câu hỏi kiểm toán viên luôn hỏi, và nguồn trả lời:
 

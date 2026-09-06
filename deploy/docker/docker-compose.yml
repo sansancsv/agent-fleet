@@ -250,6 +250,11 @@ services:
       ACPX_AUTH_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ACPX_AUTH_GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # Bộ nhớ giữa các phiên và vết chạy. Cả hai CHỈ do container này ghi —
+      # agent-runner không mount, nên không có màn tranh chấp quyền giữa hai
+      # image như đã gặp với openclaw-audit (xem docs/05 §quyền volume).
+      FLEET_MEMORY_DIR: /srv/fleet-memory
+      FLEET_TRAJECTORY_DIR: /var/log/fleet/trajectory
     ports:
       - "127.0.0.1:${LANGGRAPH_PORT:-2024}:8000"
     volumes:
@@ -257,6 +262,9 @@ services:
       - ../../profiles:/fleet/profiles:ro
       - ../../execution-plane/config/acpx.global.json:/root/.acpx/config.json:ro
       - fleet-logs:/var/log/fleet
+      # Volume RIÊNG cho bộ nhớ: mất fleet-logs là mất số liệu, chấp nhận được;
+      # mất bộ nhớ là fleet quên sạch mọi bài học đã tích luỹ.
+      - fleet-memory:/srv/fleet-memory
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/ok',timeout=3).status==200 else 1)\""]
       interval: 10s
@@ -343,3 +351,4 @@ volumes:
   acpx-state:
   mcporter-cred:
   fleet-logs:
+  fleet-memory:

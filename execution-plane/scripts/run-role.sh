@@ -39,6 +39,32 @@ for arg in "$@"; do
   [[ "$arg" == "--write" ]] && PERM=--approve-all
 done
 
+# --- THU HẸP KHOÁ MODEL ------------------------------------------------------
+# acpx truyền môi trường của nó xuống MỌI tiến trình con, kể cả lệnh shell mà
+# chính agent quyết định chạy. Nghĩa là một lượt `implementer` (có quyền exec)
+# nhìn thấy được mọi khoá model có trong container này.
+#
+# Không gỡ được khoá của backend đang dùng — acpx cần nó để gọi model. Nhưng gỡ
+# được hai khoá còn lại: bán kính thiệt hại hạ từ ba nhà cung cấp xuống một.
+# Đây là giảm thiểu, KHÔNG phải bản vá đầy đủ — xem
+# docs/adr/0001-tach-khoa-model-khoi-container-chay-code.md
+#
+# Bản sao của logic này nằm ở `acpx_client.provider_env()` (nhánh chạy tại chỗ
+# cho dev/test). Hai chỗ phải khớp; scripts/validate.sh bước 5d kiểm điều đó.
+case "$AGENT" in
+  claude) KEEP=ANTHROPIC ;;
+  codex)  KEEP=OPENAI    ;;
+  gemini) KEEP=GEMINI    ;;
+  # Backend lạ: gỡ TẤT CẢ. Fail closed — thà hỏng vì thiếu khoá còn hơn lặng lẽ
+  # phơi cả ba cho một backend chưa ai rà.
+  *)      KEEP=__NONE__  ;;
+esac
+for PROVIDER in ANTHROPIC OPENAI GEMINI; do
+  [[ "$PROVIDER" == "$KEEP" ]] && continue
+  unset "ACPX_AUTH_${PROVIDER}_API_KEY" "${PROVIDER}_API_KEY"
+done
+unset PROVIDER KEEP
+
 SESSION="${FLEET_SESSION:-${ROLE}-$(date +%s)-$$}"
 LOG_DIR="${FLEET_LOG_DIR:-/var/log/fleet}/${ROLE}"
 mkdir -p "$LOG_DIR"

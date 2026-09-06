@@ -23,6 +23,7 @@ import asyncio
 import json
 import os
 import shlex
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -46,12 +47,25 @@ ROLE_BACKENDS: dict[str, tuple[str, Permission]] = {
 }
 
 
+# Backend acpx -> tiền tố biến môi trường chứa khoá của nhà cung cấp đó.
+# Dùng để THU HẸP khoá: một lượt chạy `claude` không có lý do gì được nhìn thấy
+# khoá OpenAI và Gemini. Xem docs/adr/0001 — đây là phần giảm bán kính thiệt
+# hại làm được ngay, không phải là bản vá đầy đủ cho việc khoá nằm cùng
+# container với code do agent sinh ra.
+BACKEND_PROVIDER: dict[str, str] = {
+    "claude": "ANTHROPIC",
+    "codex": "OPENAI",
+    "gemini": "GEMINI",
+}
+
+
 @dataclass(slots=True)
 class AgentResult:
     role: str
     text: str
     exit_code: int
     status: dict[str, str] = field(default_factory=dict)
+    duration_ms: int = 0
 
     @property
     def ok(self) -> bool:
@@ -64,6 +78,32 @@ class AgentResult:
 
 class AcpxError(RuntimeError):
     pass
+
+
+def provider_env(backend: str, base: dict[str, str] | None = None) -> dict[str, str]:
+    """Môi trường cho một lượt acpx, đã GỠ khoá của các nhà cung cấp khác.
+
+    Vì sao cần: acpx truyền môi trường của nó xuống mọi tiến trình con, kể cả
+    lệnh shell mà chính agent quyết định chạy. Nghĩa là một lượt `implementer`
+    (có quyền exec) nhìn thấy được mọi khoá model có trong container. Không gỡ
+    được khoá của backend đang dùng — acpx cần nó để gọi model — nhưng gỡ được
+    hai khoá còn lại, tức là hạ bán kính thiệt hại từ ba nhà cung cấp xuống một.
+
+    Backend lạ (chưa có trong BACKEND_PROVIDER) → gỡ TẤT CẢ khoá đã biết. Fail
+    closed: thà lượt đó hỏng vì thiếu khoá còn hơn lặng lẽ phơi cả ba.
+
+    Bản sao của logic này nằm ở `execution-plane/scripts/run-role.sh` (nhánh
+    chạy qua agent-runner). Hai chỗ phải khớp nhau; `scripts/validate.sh` bước
+    5d kiểm điều đó.
+    """
+    env = dict(base if base is not None else os.environ)
+    keep = BACKEND_PROVIDER.get(backend)
+    for provider in set(BACKEND_PROVIDER.values()):
+        if provider == keep:
+            continue
+        env.pop(f"ACPX_AUTH_{provider}_API_KEY", None)
+        env.pop(f"{provider}_API_KEY", None)
+    return env
 
 
 async def run_role(
@@ -85,6 +125,8 @@ async def run_role(
 
     backend, default_perm = ROLE_BACKENDS[role]
     perm = permission or default_perm
+
+    started = time.monotonic()
 
     runner_url = os.environ.get("AGENT_RUNNER_URL", "").rstrip("/")
     if runner_url:
@@ -109,7 +151,7 @@ async def run_role(
     else:
         argv += ["exec", prompt]
 
-    env = {**os.environ, "ACPX_NON_INTERACTIVE": "1"}
+    env = {**provider_env(backend), "ACPX_NON_INTERACTIVE": "1"}
 
     proc = await asyncio.create_subprocess_exec(
         *argv,
@@ -132,6 +174,7 @@ async def run_role(
         text=text,
         exit_code=proc.returncode or 0,
         status=_extract_status(text),
+        duration_ms=int((time.monotonic() - started) * 1000),
     )
 
 
@@ -195,6 +238,9 @@ def _run_remote(
         text=text,
         exit_code=int(payload.get("exit", 0) or 0),
         status=payload.get("status") or _extract_status(text),
+        # Runner đã đo sẵn (handleRun trong server.mjs). Lấy số của nó thay vì
+        # đo lại ở đây: số của runner không tính thời gian đi trên mạng nội bộ.
+        duration_ms=int(payload.get("durationMs", 0) or 0),
     )
 
 

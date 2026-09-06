@@ -76,6 +76,27 @@ for f in orchestration/n8n/workflows/*.json; do
   fi
 done
 
+# --- 5d. Khoá model phải được thu hẹp theo backend --------------------------
+# Xem docs/adr/0001. acpx truyền môi trường xuống MỌI tiến trình con, kể cả lệnh
+# do chính agent quyết định chạy — nên một lượt `implementer` không được nhìn
+# thấy khoá của nhà cung cấp mà nó không dùng. Logic này tồn tại ở HAI nơi
+# (shell và Python) và cả hai đều dễ bị gỡ mất trong một lần refactor vô tình.
+# Phép kiểm này chặn đúng chuyện đó — nó bảo vệ một biện pháp BẢO MẬT, không
+# phải một quy ước về phong cách.
+echo; echo "5d) Thu hẹp khoá model theo backend"
+RR=execution-plane/scripts/run-role.sh
+AC=orchestration/langgraph/src/fleet/acpx_client.py
+if grep -q 'unset "ACPX_AUTH_${PROVIDER}_API_KEY"' "$RR"; then
+  pass "$RR gỡ khoá của nhà cung cấp không dùng"
+else
+  fail "$RR KHÔNG còn gỡ khoá model — đọc docs/adr/0001 trước khi bỏ phần này"
+fi
+if grep -q 'def provider_env' "$AC" && grep -q 'provider_env(backend)' "$AC"; then
+  pass "$AC có provider_env() và thực sự dùng nó"
+else
+  fail "$AC thiếu provider_env() hoặc khai mà không gọi — hai nhánh chạy phải khớp nhau"
+fi
+
 # --- 6. NHẤT QUÁN: vai trò trong openclaw phải khớp policy và script ---------
 echo; echo "6) Nhất quán vai trò giữa các tầng"
 ROLES_OC=$(python3 scripts/json5_to_json.py control-plane/config.d/agents.json \

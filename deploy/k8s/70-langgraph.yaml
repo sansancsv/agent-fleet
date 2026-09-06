@@ -26,12 +26,18 @@ spec:
             - { name: MCPORTER_BRIDGE_URL, value: "http://mcporter:7420/mcp" }
             # Mọi lượt agent đi qua dịch vụ agent-runner (POST /run).
             - { name: AGENT_RUNNER_URL, value: "http://agent-runner:8787" }
+            # Bộ nhớ giữa các phiên và vết chạy. replicas=2 nên cả hai đường dẫn
+            # phải nằm trên PVC ReadWriteMany: hai pod cùng ghi bài học và cùng
+            # đọc lại. Ghi là append từng dòng/từng file nhỏ nên không cần khoá.
+            - { name: FLEET_MEMORY_DIR, value: /srv/fleet-memory }
+            - { name: FLEET_TRAJECTORY_DIR, value: /srv/fleet-memory/trajectory }
           # fleet-service-tokens cấp LANGGRAPH_TOKEN (auth API) và AGENT_RUNNER_TOKEN.
           envFrom:
             - secretRef: { name: fleet-model-keys }
             - secretRef: { name: fleet-service-tokens }
           volumeMounts:
             - { name: repos, mountPath: /srv/repos }
+            - { name: memory, mountPath: /srv/fleet-memory }
           readinessProbe:
             httpGet: { path: /ok, port: http }
             periodSeconds: 10
@@ -40,6 +46,7 @@ spec:
             limits:   { cpu: "2",  memory: 4Gi }
       volumes:
         - { name: repos, persistentVolumeClaim: { claimName: fleet-repos } }
+        - { name: memory, persistentVolumeClaim: { claimName: fleet-memory } }
 ---
 apiVersion: v1
 kind: Service
@@ -54,3 +61,13 @@ metadata: { name: fleet-repos, namespace: fleet }
 spec:
   accessModes: [ReadWriteMany]      # nhiều pod cùng đọc/ghi worktree
   resources: { requests: { storage: 200Gi } }
+---
+# Bộ nhớ của fleet — Markdown thuần, KHÔNG phải vector DB (xem docs/06 §3).
+# Nhỏ có chủ đích: mọi thứ ở đây đều có trần (MAX_LESSONS, MAX_PROGRESS_LINES).
+# Nếu PVC này đầy thì nghĩa là trần đã bị gỡ ở đâu đó, không phải cần thêm đĩa.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: fleet-memory, namespace: fleet }
+spec:
+  accessModes: [ReadWriteMany]      # replicas=2 cùng ghi bài học
+  resources: { requests: { storage: 5Gi } }

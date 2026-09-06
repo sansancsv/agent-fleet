@@ -262,6 +262,25 @@ async def run_resume(thread_id: str, decision: ResumeRequest) -> dict:
     return {"thread_id": thread_id, **_summarize(snap)}
 
 
+# ---------------------------------------------------------------------------
+# Chỉ số vận hành — bốn chỉ số ở mục 3.8 của tài liệu tham chiếu
+# ---------------------------------------------------------------------------
+@app.get("/metrics", dependencies=[Protected])
+async def metrics(days: int = 30) -> dict:
+    """Đọc vết chạy và trả bốn chỉ số. Không phải Prometheus.
+
+    Cố ý KHÔNG mở endpoint này cho mọi người: vết chạy chứa mã công việc, tên
+    người duyệt và tên file có lỗi. Đó là dữ liệu nội bộ, không phải số liệu
+    sức khoẻ công khai. Ai cần dashboard thì gọi kèm token như n8n.
+
+    Trần 365 ngày để một tham số `days` lớn không biến endpoint này thành cách
+    làm cạn I/O của cả container.
+    """
+    from .metrics import collect
+
+    return collect(days=max(1, min(int(days), 365)))
+
+
 @app.get("/runs/{thread_id}", dependencies=[Protected])
 async def run_state(thread_id: str) -> dict:
     graph = _state["app"]

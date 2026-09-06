@@ -58,6 +58,14 @@ audit:  ## Chạy rà soát bảo mật của OpenClaw + test chính sách OPA
 test:  ## Chạy test của bộ điều phối
 	cd orchestration/langgraph && python -m pytest tests/ -q
 
+.PHONY: metrics
+metrics:  ## Bốn chỉ số vận hành từ vết chạy (dùng: make metrics D=7)
+	$(COMPOSE) exec -T langgraph python -m fleet.metrics --days $(or $(D),30)
+
+.PHONY: memory
+memory:  ## Xem mục lục bộ nhớ mà agent đang đọc mỗi lượt
+	$(COMPOSE) exec -T langgraph cat /srv/fleet-memory/MEMORY.md
+
 # --- Vận hành ---------------------------------------------------------------
 .PHONY: capability
 capability:  ## Sinh lại các CLI từ MCP server sau khi sửa mcporter.json
