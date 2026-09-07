@@ -247,6 +247,110 @@ else
   FAIL=1
 fi
 
+# --- 8d. K8s: tham chiếu treo và NetworkPolicy thiếu -------------------------
+# Đây là loại lỗi chỉ lộ ra lúc `kubectl apply` lên cụm thật, tức là lúc đắt
+# nhất để phát hiện. Ba lỗi bắt được ở đây đều đã có thật trong repo này
+# (rà soát 07/09/2026, xem docs/adr/0002):
+#   1. `fleet-mcp-credentials` được envFrom nhưng chưa từng được định nghĩa
+#      → pod kẹt CreateContainerConfigError.
+#   2. default-deny chặn cả hai chiều nhưng thiếu ingress cho mcporter và
+#      thiếu egress cho langgraph → cụm im lặng không chạy.
+#   3. readinessProbe httpGet /healthz trên dịch vụ không có endpoint đó
+#      → Deployment không bao giờ Ready.
+# NetworkPolicy là CỘNG DỒN và HAI CHIỀU: A tới được B chỉ khi A có egress rule
+# VÀ B có ingress rule. Phép kiểm dưới đây bắt đúng vế hay bị quên.
+echo; echo "8d) Kubernetes — tham chiếu treo và NetworkPolicy"
+python3 - <<'PYK8S'
+import glob, sys
+import yaml
+
+docs = []
+for path in sorted(glob.glob("deploy/k8s/*.yaml")):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            docs += [(path, d) for d in yaml.safe_load_all(fh) if isinstance(d, dict)]
+    except yaml.YAMLError as exc:
+        print(f"  {path}: YAML hỏng — {exc}")
+        sys.exit(1)
+
+bad = []
+
+# --- Nguồn secret và configMap có trong repo ---------------------------------
+have_secrets = {
+    d["metadata"]["name"]
+    for _, d in docs
+    if d.get("kind") in ("ExternalSecret", "Secret", "SealedSecret")
+}
+# ExternalSecret đặt tên Secret sinh ra ở spec.target.name; lấy cả tên đó.
+have_secrets |= {
+    (d.get("spec", {}).get("target") or {}).get("name")
+    for _, d in docs
+    if d.get("kind") == "ExternalSecret"
+} - {None}
+have_cms = {d["metadata"]["name"] for _, d in docs if d.get("kind") == "ConfigMap"}
+
+workloads = [(p, d) for p, d in docs if d.get("kind") in ("Deployment", "StatefulSet", "DaemonSet")]
+
+for path, d in workloads:
+    name = d["metadata"]["name"]
+    spec = d["spec"]["template"]["spec"]
+    for c in spec.get("containers", []) + spec.get("initContainers", []):
+        for ef in c.get("envFrom", []) or []:
+            ref = (ef.get("secretRef") or {}).get("name")
+            if ref and ref not in have_secrets:
+                bad.append(f"{path}: {name} envFrom secret '{ref}' không có nguồn trong repo")
+            ref = (ef.get("configMapRef") or {}).get("name")
+            if ref and ref not in have_cms:
+                bad.append(f"{path}: {name} envFrom configMap '{ref}' không có nguồn trong repo")
+        for e in c.get("env", []) or []:
+            vf = e.get("valueFrom") or {}
+            ref = (vf.get("secretKeyRef") or {}).get("name")
+            if ref and ref not in have_secrets:
+                bad.append(f"{path}: {name} env {e['name']} → secret '{ref}' không có nguồn")
+        # readinessProbe httpGet trên dịch vụ không phơi HTTP là lỗi im lặng:
+        # Deployment không bao giờ Ready mà log thì sạch.
+        for probe in ("readinessProbe", "livenessProbe", "startupProbe"):
+            p = c.get(probe) or {}
+            if "httpGet" in p and c.get("name") == "mcporter":
+                bad.append(f"{path}: {name}.{probe} dùng httpGet — mcporter serve không có endpoint HTTP nào; dùng tcpSocket")
+
+# --- NetworkPolicy: mọi workload phải được cả hai chiều chọn tới -------------
+policies = [d for _, d in docs if d.get("kind") == "NetworkPolicy"]
+
+def selects(pol, labels: dict) -> bool:
+    """Policy có nhắm ĐÍCH DANH workload này không.
+
+    podSelector rỗng (chọn mọi pod) KHÔNG tính. Nếu tính, thì `allow-dns` —
+    vốn chỉ mở cổng 53 cho toàn namespace — sẽ làm mọi workload trông như đã
+    có đường ra, và phép kiểm này trở nên vô dụng đúng lúc cần nhất.
+    """
+    sel = (pol.get("spec", {}) or {}).get("podSelector", {})
+    match = (sel or {}).get("matchLabels") or {}
+    if not match:
+        return False
+    return all(labels.get(k) == v for k, v in match.items())
+
+for path, d in workloads:
+    name = d["metadata"]["name"]
+    labels = ((d["spec"]["template"].get("metadata") or {}).get("labels")) or {}
+    for direction, key in (("Ingress", "ingress"), ("Egress", "egress")):
+        # Chỉ tính policy có RULE thật; default-deny chọn mọi pod nhưng không
+        # mở đường nào, nên không được tính là đã có đường.
+        opened = any(
+            direction in (p["spec"].get("policyTypes") or [])
+            and (p["spec"].get(key) or [])
+            and selects(p, labels)
+            for p in policies
+        )
+        if not opened:
+            bad.append(f"{path}: {name} không có NetworkPolicy {direction} nào mở đường — "
+                       f"default-deny sẽ chặn hết")
+
+print("\n".join("  " + b for b in bad))
+sys.exit(1 if bad else 0)
+PYK8S
+if [[ $? -eq 0 ]]; then pass "tham chiếu secret/configMap và NetworkPolicy đầy đủ"; else FAIL=1; fi
+
 # --- 9. Không có secret bị lộ trong git -------------------------------------
 echo; echo "9) Quét secret bị commit"
 if grep -rInE '(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{30,}|xox[bap]-[0-9]{10,})' \

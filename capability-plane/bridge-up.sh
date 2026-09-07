@@ -40,6 +40,33 @@ SERVE_ARGS=()
 # Dò `--help` lúc chạy thay vì đoán, rồi chọn đường phù hợp.
 HELP="$(mcporter serve --help 2>&1 || true)"
 
+# --- Xác thực cho cầu nối, NẾU bản mcporter này hỗ trợ -----------------------
+# `MCPORTER_BRIDGE_TOKEN` đã được cấp trong fleet-service-tokens từ lâu nhưng
+# script này chưa bao giờ dùng tới. Một chốt bảo mật tồn tại trong secret mà
+# không tồn tại trong luồng chạy còn nguy hiểm hơn là không có: người đọc cấu
+# hình tưởng cầu nối có auth, và nới NetworkPolicy dựa trên niềm tin đó.
+#
+# Dò cờ theo đúng lối đã dùng cho --host/--bind bên dưới, thay vì đoán tên cờ.
+# Nếu bản này không có auth thì NÓI THẲNG ra log — im lặng là cách để sáu tháng
+# sau không ai còn nhớ rằng cách ly mạng là lớp bảo vệ DUY NHẤT ở đây.
+TOKEN="${MCPORTER_BRIDGE_TOKEN:-}"
+if [[ -n "$TOKEN" ]]; then
+  if grep -qE -- '--auth-token' <<<"$HELP"; then
+    SERVE_ARGS+=(--auth-token "$TOKEN")
+    echo "[bridge] bật xác thực Bearer (--auth-token)"
+  elif grep -qE -- '--token' <<<"$HELP"; then
+    SERVE_ARGS+=(--token "$TOKEN")
+    echo "[bridge] bật xác thực Bearer (--token)"
+  else
+    echo "[bridge] CẢNH BÁO: mcporter $(mcporter --version 2>/dev/null || echo '?') KHÔNG có cờ xác thực." >&2
+    echo "[bridge] MCPORTER_BRIDGE_TOKEN đang được cấp nhưng KHÔNG có tác dụng." >&2
+    echo "[bridge] Lớp bảo vệ DUY NHẤT của cầu nối lúc này là cách ly tầng mạng." >&2
+    echo "[bridge] Xem docs/adr/0002 trước khi mở thêm bất kỳ ai vào cổng $PORT." >&2
+  fi
+else
+  echo "[bridge] CẢNH BÁO: chưa đặt MCPORTER_BRIDGE_TOKEN — cầu nối không xác thực." >&2
+fi
+
 if [[ "$BIND" == "127.0.0.1" || "$BIND" == "localhost" ]]; then
   echo "[bridge] nghe loopback :$PORT"
   exec mcporter serve --http "$PORT" "${SERVE_ARGS[@]}"

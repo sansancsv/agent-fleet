@@ -11,6 +11,19 @@ automountServiceAccountToken: false
 ---
 apiVersion: v1
 kind: ServiceAccount
+metadata: { name: mcporter, namespace: fleet }
+automountServiceAccountToken: false
+---
+# Danh tính DUY NHẤT được phép đọc secret của fleet từ Vault. Tách khỏi
+# `agent-runner` có chủ đích: danh tính mở kho secret không được trùng với danh
+# tính của container chạy code do agent sinh ra. Xem 30-secrets.yaml.
+# SA này không gắn với pod nào của fleet — chỉ External Secrets Operator dùng.
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: external-secrets, namespace: fleet }
+---
+apiVersion: v1
+kind: ServiceAccount
 metadata: { name: fleet-sre, namespace: fleet }
 ---
 # Vai trò SRE: được xem và rollback trong namespace prod, KHÔNG được xoá.

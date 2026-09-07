@@ -1,6 +1,30 @@
-# Mặc định CHẶN HẾT, rồi mở từng đường một.
-# Với một fleet agent, đây là biện pháp kiểm soát quan trọng nhất: kể cả khi
-# model bị dẫn dụ, nó cũng không có đường ra ngoài để mang dữ liệu đi.
+# =============================================================================
+# NetworkPolicy — mặc định CHẶN HẾT, rồi mở từng đường một
+# -----------------------------------------------------------------------------
+# BA ĐIỀU PHẢI BIẾT TRƯỚC KHI SỬA FILE NÀY
+#
+# 1. NetworkPolicy là CỘNG DỒN và HAI CHIỀU. Một gói tin từ A tới B chỉ đi được
+#    khi CẢ HAI điều kiện đúng: A có egress rule cho phép tới B, VÀ B có ingress
+#    rule cho phép từ A. Bản trước của file này chỉ có egress cho agent-runner
+#    mà không có ingress cho mcporter — nghĩa là cầu nối không ai gọi tới được,
+#    và langgraph thì không có egress nào ngoài DNS nên không chạm được cả
+#    agent-runner lẫn PostgreSQL. Bộ policy đó chưa từng được apply lên cụm thật
+#    (repo mới chạy Docker Compose), nên đây là lỗi tiềm ẩn, không phải sự cố.
+#
+# 2. Không diễn đạt được tên miền. NetworkPolicy chỉ hiểu podSelector,
+#    namespaceSelector và ipBlock (CIDR). Mọi thứ kiểu "chỉ cho gọi
+#    api.anthropic.com" phải làm ở tầng khác — đó chính là lý do tồn tại của
+#    llm-egress-gateway trong ADR-0002.
+#
+# 3. Đây là lớp phòng thủ, KHÔNG phải lớp duy nhất. Sự cố Hugging Face 07/2026
+#    cho thấy một môi trường bị giới hạn mạng vẫn thoát được, bằng cách khai
+#    thác zero-day trong CHÍNH cái proxy được phép ra ngoài. Đọc ADR-0002 trước
+#    khi tin rằng file này đủ.
+#
+# Kiểm nhanh sau khi sửa:
+#   scripts/validate.sh bước 8d  — mọi Deployment phải được cả ingress lẫn
+#                                  egress policy chọn tới
+# =============================================================================
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata: { name: default-deny-all, namespace: fleet }
@@ -8,6 +32,7 @@ spec:
   podSelector: {}
   policyTypes: [Ingress, Egress]
 ---
+# DNS cho mọi pod. Không có cái này thì không pod nào phân giải được tên Service.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata: { name: allow-dns, namespace: fleet }
@@ -20,8 +45,12 @@ spec:
           podSelector: { matchLabels: { k8s-app: kube-dns } }
       ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
 ---
-# CHỈ mcporter được gọi ra Internet. Mọi năng lực ngoài đi qua đúng một cửa,
-# nên chỉ cần giám sát một chỗ, và thu hồi quyền cũng chỉ ở một chỗ.
+# ---------------------------------------------------------------------------
+# mcporter — cầu nối năng lực
+# ---------------------------------------------------------------------------
+# EGRESS: ra Internet qua 443. Loại trừ dải nội bộ và 169.254.169.254 (endpoint
+# metadata của cloud — nếu không chặn, một model bị dẫn dụ chỉ cần một lệnh curl
+# là lấy được credential của node).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata: { name: mcporter-egress, namespace: fleet }
@@ -35,8 +64,26 @@ spec:
             except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.169.254/32]
       ports: [{ protocol: TCP, port: 443 }]
 ---
-# agent-runner KHÔNG được ra Internet trực tiếp; chỉ nói chuyện với mcporter,
-# và với các API model qua egress gateway có ghi log.
+# INGRESS: ai được gọi vào cầu nối. THIẾU RULE NÀY THÌ CẦU NỐI CHẾT — đây là
+# chỗ bản trước hỏng. `mcporter serve` không có xác thực (xem bridge-up.sh), nên
+# rule này KHÔNG phải lớp phòng thủ phụ, nó là lớp DUY NHẤT. Thêm bất kỳ ai vào
+# đây tức là cấp cho họ toàn bộ credential MCP của công ty.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: mcporter-ingress, namespace: fleet }
+spec:
+  podSelector: { matchLabels: { app: mcporter } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: agent-runner } }
+        - podSelector: { matchLabels: { app: openclaw-gateway } }
+        - podSelector: { matchLabels: { tier: orchestration } }
+      ports: [{ protocol: TCP, port: 7420 }]
+---
+# ---------------------------------------------------------------------------
+# agent-runner — tầng thực thi, nơi chạy code do agent sinh ra
+# ---------------------------------------------------------------------------
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata: { name: agent-runner-egress, namespace: fleet }
@@ -46,15 +93,23 @@ spec:
   egress:
     - to: [{ podSelector: { matchLabels: { app: mcporter } } }]
       ports: [{ protocol: TCP, port: 7420 }]
+    # Đích đến: mọi lời gọi model đi qua một gateway có ghi log và có hạn mức.
+    # Thành phần này CHƯA TỒN TẠI trong repo — xem ADR-0002 §phương án A.
     - to: [{ podSelector: { matchLabels: { app: llm-egress-gateway } } }]
       ports: [{ protocol: TCP, port: 8443 }]
+    # ⚠️ TẠM THỜI — GỠ NGAY KHI CÓ llm-egress-gateway.
+    # Chừng nào gateway đó chưa tồn tại, agent-runner phải tự gọi API model, tức
+    # là phải ra được Internet. Rule này làm cụm chạy được, và đồng thời làm mất
+    # phần lớn giá trị của việc "chỉ mcporter ra Internet": một agent bị dẫn dụ
+    # có đường mang dữ liệu đi. Khoảng hở đã biết, ghi ở ADR-0002.
     - to:
-        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
-          podSelector: { matchLabels: { k8s-app: kube-dns } }
-      ports: [{ protocol: UDP, port: 53 }]
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.169.254/32]
+      ports: [{ protocol: TCP, port: 443 }]
 ---
-# Ai được GỌI VÀO agent-runner: chỉ tầng điều phối và gateway, đúng cổng API.
-# Token Bearer là lớp thứ hai; lớp thứ nhất là không ai khác tới được cổng này.
+# INGRESS: chỉ tầng điều phối và gateway, đúng cổng API. Token Bearer là lớp
+# thứ hai; lớp thứ nhất là không ai khác tới được cổng này.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata: { name: agent-runner-ingress, namespace: fleet }
@@ -66,3 +121,78 @@ spec:
         - podSelector: { matchLabels: { tier: orchestration } }
         - podSelector: { matchLabels: { app: openclaw-gateway } }
       ports: [{ protocol: TCP, port: 8787 }]
+---
+# ---------------------------------------------------------------------------
+# langgraph — tầng điều phối
+# ---------------------------------------------------------------------------
+# EGRESS: agent-runner cho từng lượt agent, và PostgreSQL cho checkpoint.
+# PostgreSQL là dịch vụ quản lý NGOÀI cụm (xem secret `fleet-db`), nên phải mở
+# bằng CIDR. THU HẸP `postgresCidr` VỀ ĐÚNG DẢI CỦA CSDL trước khi lên production
+# — để rộng là mở cho langgraph gọi tới mọi thứ trong VPC ở cổng 5432.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: langgraph-egress, namespace: fleet }
+spec:
+  podSelector: { matchLabels: { tier: orchestration } }
+  policyTypes: [Egress]
+  egress:
+    - to: [{ podSelector: { matchLabels: { app: agent-runner } } }]
+      ports: [{ protocol: TCP, port: 8787 }]
+    - to: [{ podSelector: { matchLabels: { app: mcporter } } }]
+      ports: [{ protocol: TCP, port: 7420 }]
+    - to:
+        - ipBlock: { cidr: 10.20.0.0/16 }   # ← SỬA thành dải của PostgreSQL
+      ports: [{ protocol: TCP, port: 5432 }]
+---
+# INGRESS: n8n và gateway gọi API của bộ điều phối. Ingress controller được cho
+# vào để người duyệt bấm nút được — bỏ dòng đó nếu không phơi API ra ngoài cụm.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: langgraph-ingress, namespace: fleet }
+spec:
+  podSelector: { matchLabels: { tier: orchestration } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: openclaw-gateway } }
+        - podSelector: { matchLabels: { app: n8n } }
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } }
+      ports: [{ protocol: TCP, port: 8000 }]
+---
+# ---------------------------------------------------------------------------
+# openclaw-gateway — tầng điều khiển
+# ---------------------------------------------------------------------------
+# EGRESS: đây là chỗ khẳng định "chỉ mcporter được ra Internet" KHÔNG còn đúng.
+# Gateway dùng Socket Mode của Slack (repo có SLACK_APP_TOKEN_*), nghĩa là nó
+# chủ động mở kết nối WebSocket RA NGOÀI. Không có rule 443 thì kênh chat không
+# lên. Vậy namespace này có HAI đường ra Internet, không phải một — tài liệu đã
+# được sửa cho khớp (docs/00 §luồng, docs/04 §2).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: openclaw-gateway-egress, namespace: fleet }
+spec:
+  podSelector: { matchLabels: { app: openclaw-gateway } }
+  policyTypes: [Egress]
+  egress:
+    - to: [{ podSelector: { matchLabels: { app: mcporter } } }]
+      ports: [{ protocol: TCP, port: 7420 }]
+    - to: [{ podSelector: { matchLabels: { app: agent-runner } } }]
+      ports: [{ protocol: TCP, port: 8787 }]
+    - to: [{ podSelector: { matchLabels: { tier: orchestration } } }]
+      ports: [{ protocol: TCP, port: 8000 }]
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.169.254/32]
+      ports: [{ protocol: TCP, port: 443 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: openclaw-gateway-ingress, namespace: fleet }
+spec:
+  podSelector: { matchLabels: { app: openclaw-gateway } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } }
+      ports: [{ protocol: TCP, port: 18789 }]

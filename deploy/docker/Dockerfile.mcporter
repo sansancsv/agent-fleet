@@ -1,0 +1,53 @@
+# =============================================================================
+# mcporter — ảnh RIÊNG cho cầu nối năng lực
+# -----------------------------------------------------------------------------
+# VÌ SAO TÁCH KHỎI Dockerfile.agent-runner
+#
+# Pod này giữ TOÀN BỘ credential MCP của công ty: token GitHub, token Grafana,
+# DSN kho dữ liệu, OAuth Notion/Linear/Drive, client secret HubSpot. Trước đây
+# nó dùng chung ảnh với agent-runner, nghĩa là cạnh kho credential đó có sẵn
+# `acpx`, ba backend agent, `gh`, `git`, `build-essential` và `run-role.sh` —
+# tức là đủ đồ nghề để chạy code tuỳ ý và mang dữ liệu đi.
+#
+# Sự cố Hugging Face 07/2026 đi đúng đường đó: thoát ra qua chính cái proxy được
+# phép ra Internet, rồi thu hoạch credential và di chuyển ngang. Ảnh này tồn tại
+# để nếu cầu nối bị chiếm, kẻ chiếm được nhận một môi trường trống.
+#
+# NGUYÊN TẮC: chỉ cài thứ `mcporter serve` thật sự cần. Mỗi lần thêm một dòng
+# vào đây, hãy hỏi "công cụ này giúp gì cho việc chuyển tiếp lời gọi MCP?" —
+# nếu câu trả lời là "không, nó tiện khi debug" thì đừng thêm.
+#
+# Xem: docs/adr/0002-mot-cua-ra-internet-va-credential-dat-canh-cong-cu.md
+# =============================================================================
+FROM node:24-bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    NODE_ENV=production \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+
+# ca-certificates : bắt buộc, mcporter gọi HTTPS ra các MCP server
+# curl            : healthcheck và OAuth callback
+# socat           : bridge-up.sh cần khi bản mcporter chỉ nghe được loopback
+# netcat-openbsd  : healthcheck kiểm cổng TCP (mcporter không có /healthz)
+# CỐ Ý KHÔNG CÓ: git, gh, build-essential, python3, acpx, các backend agent.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl socat netcat-openbsd \
+ && rm -rf /var/lib/apt/lists/*
+
+ARG MCPORTER_VERSION=latest
+RUN npm install -g "mcporter@${MCPORTER_VERSION}" \
+ && npm cache clean --force
+
+# Chỉ capability-plane. KHÔNG copy execution-plane (chứa run-role.sh và runner)
+# và KHÔNG copy profiles — cầu nối không cần biết vai trò nào được làm gì.
+COPY --chown=node:node capability-plane /fleet/capability-plane
+
+RUN find /fleet -name '*.sh' -exec chmod +x {} + \
+ && mkdir -p /var/log/fleet /home/node/.mcporter \
+      /home/node/.local/share/mcporter /home/node/.cache/mcporter \
+ && chown -R node:node /var/log/fleet /home/node
+
+USER node
+WORKDIR /home/node
+
+CMD ["bash", "/fleet/capability-plane/bridge-up.sh"]

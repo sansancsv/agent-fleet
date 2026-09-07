@@ -1,8 +1,23 @@
 # 0001. Thu hẹp khoá model theo backend, chưa tách hẳn khỏi container chạy code
 
 - Trạng thái: đã chấp thuận
-- Ngày: 2026-09-06
+- Ngày: 2026-09-06 (bổ sung 2026-09-07)
 - Người quyết định: chủ sở hữu nền tảng fleet
+- Liên quan: ADR-0002 (một cửa ra Internet)
+
+> **Bổ sung 07/09/2026 — phạm vi rộng hơn bản đầu.** ADR này ban đầu chỉ nói về
+> `agent-runner`. Rà soát sau đó cho thấy **`openclaw-gateway` cũng nhận cả ba
+> khoá model** (`40-openclaw-gateway.yaml`, `envFrom: fleet-model-keys`; compose
+> cũng vậy), và gateway cũng chạy agent qua sandbox của OpenClaw. Vậy có **hai**
+> nơi khoá model nằm cạnh nơi chạy code, không phải một.
+>
+> Phần thu hẹp khoá theo backend hiện chỉ áp dụng cho `run-role.sh` và
+> `acpx_client.py` — tức là **không bảo vệ đường của gateway**. Gateway chọn
+> backend theo cấu hình OpenClaw, không qua hai file đó, nên không có chỗ nào
+> để chèn cùng logic mà không sửa hành vi của OpenClaw.
+>
+> Điều này làm phương án A (proxy model) đáng giá hơn bản đầu đánh giá: nó là
+> cách duy nhất đóng được **cả hai** đường bằng một thay đổi.
 
 ## Bối cảnh
 

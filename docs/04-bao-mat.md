@@ -39,6 +39,31 @@ tả người đọc được). Rego, cờ acpx trong `run-role.sh` và `ROLE_BA
 `acpx_client.py` phải tự soát khi đổi vai trò. Với `reviewer` hôm nay, hai tầng
 thật sự giữ là 1 và 2.
 
+### Tầng 4 (Kubernetes) yếu hơn bảng trên gợi ý
+
+Bảng trên mô tả trạng thái mong muốn. Rà soát 07/09/2026 tìm ra bốn chỗ lệch,
+tất cả đã sửa nhưng **chưa ai kiểm chứng trên cụm thật** (repo mới chạy Compose):
+
+- Bộ NetworkPolicy trước đây thiếu ingress cho `mcporter` và `langgraph`, thiếu
+  egress cho `langgraph` và gateway → apply lên là cụm không chạy. Nguy hiểm ở
+  chỗ: khi cụm không chạy, áp lực sửa nhanh thường dẫn tới việc ai đó nới policy
+  bằng tay ngoài git, và không ai biết.
+- `fleet-mcp-credentials` được tham chiếu nhưng chưa từng được định nghĩa.
+- SecretStore xác thực Vault bằng ServiceAccount của `agent-runner` — danh tính
+  mở kho secret trùng với danh tính của container chạy code do agent sinh ra.
+- `mcporter` dùng chung ảnh với `agent-runner`, tức là kho credential MCP nằm
+  cạnh `acpx`, `gh`, `git` và `run-role.sh`.
+
+Chi tiết và quyết định: `docs/adr/0002`.
+
+### Cầu nối mcporter: cách ly mạng là lớp DUY NHẤT
+
+`mcporter serve` không có xác thực. `MCPORTER_BRIDGE_TOKEN` được cấp trong
+`fleet-service-tokens` nhưng chỉ có tác dụng nếu bản mcporter đang cài hỗ trợ cờ
+tương ứng — `bridge-up.sh` dò lúc chạy và **ghi cảnh báo ra log** khi không bật
+được. Trước khi mở thêm bất kỳ ai vào cổng 7420, hãy nhớ: ai gọi được cầu nối
+thì dùng được toàn bộ credential MCP của công ty.
+
 ### Khoá model: một rủi ro CHƯA đóng
 
 Vai trò `implementer` và `tester` chạy với `--approve-all`, tức là agent chạy
@@ -51,9 +76,14 @@ những nhà cung cấp không phải backend của vai trò đang chạy — b�
 hại hạ từ ba nhà cung cấp xuống một. `validate.sh` bước 5d canh cho phần này
 không bị gỡ mất.
 
-**Đây là giảm thiểu, không phải bản vá.** Lượt `implementer` vẫn đọc được khoá
-Anthropic. Đích đến là proxy model giữ khoá riêng; điều kiện kích hoạt ghi ở
-`docs/adr/0001-tach-khoa-model-khoi-container-chay-code.md`. Đừng đọc mục này
+**Đây là giảm thiểu, không phải bản vá**, và phạm vi hẹp hơn tưởng: rà soát
+07/09/2026 cho thấy `openclaw-gateway` **cũng** nhận cả ba khoá model và cũng
+chạy agent. Phần thu hẹp khoá chỉ nằm trên đường `run-role.sh` / `acpx_client`,
+nên **không bảo vệ đường của gateway**.
+
+Vậy có hai nơi khoá model nằm cạnh nơi chạy code, và mới bịt được một nửa của
+một nơi. Đích đến là proxy model giữ khoá riêng — cách duy nhất đóng cả hai
+bằng một thay đổi. Điều kiện kích hoạt ghi ở `docs/adr/0001`. Đừng đọc mục này
 như một vấn đề đã xử lý xong.
 
 ---

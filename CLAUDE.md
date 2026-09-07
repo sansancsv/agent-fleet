@@ -149,6 +149,14 @@ Phần lớn được `scripts/validate.sh` và `scripts/check-oc-placeholders.p
 
 **Docker (`deploy/docker/`)**: named volume gắn vào thư mục con của image ngoài phải có init container chown trước (`check-volume-perms.py`); image tự build thì tạo sẵn thư mục trong Dockerfile. State của OpenClaw nằm ở `/home/node/.openclaw/state`, không phải `~/.config/openclaw`.
 
+**Kubernetes (`deploy/k8s/`)** — chưa từng apply lên cụm thật, mọi khẳng định ở đây mới chỉ kiểm bằng đọc mã và `validate.sh` bước 8d:
+- **NetworkPolicy là CỘNG DỒN và HAI CHIỀU.** A gọi được B chỉ khi A có egress rule tới B *và* B có ingress rule từ A. `default-deny-all` chặn cả hai chiều cho mọi pod, nên mỗi Deployment cần **hai** policy nhắm đích danh. Quên vế ingress là cụm im lặng không chạy — đã xảy ra thật với `mcporter` và `langgraph`.
+- NetworkPolicy **không hiểu tên miền**, chỉ podSelector/namespaceSelector/CIDR. Mọi thứ kiểu "chỉ cho gọi api.anthropic.com" phải làm ở tầng khác.
+- Luôn `except: 169.254.169.254/32` trong mọi rule ra Internet — endpoint metadata của cloud.
+- `mcporter serve` **không có endpoint HTTP nào**; probe phải dùng `tcpSocket`. `httpGet /healthz` làm Deployment không bao giờ Ready mà log vẫn sạch.
+- Ảnh `mcporter` **tách riêng** khỏi `agent-runner` (`Dockerfile.mcporter`): pod giữ credential MCP không được chứa sẵn acpx/gh/git/run-role.sh. Xem `docs/adr/0002`.
+- Namespace có **hai** đường ra Internet (mcporter + gateway cho Slack Socket Mode), cộng một rule 443 **tạm thời** cho agent-runner cho tới khi có `llm-egress-gateway`. Đừng viết lại câu "chỉ mcporter được ra Internet" vào tài liệu.
+
 ## Lưu ý môi trường
 
 - Trên WSL, đặt repo trên filesystem Linux (`~/agent-fleet`), không phải `/mnt/c`: mất bit `+x`, `.env` không giữ được 600, I/O chậm. Compose gọi script qua `bash <path>` để chịu được mất `+x`.

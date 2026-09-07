@@ -11,14 +11,19 @@ spec:
     metadata:
       labels: { app: mcporter, tier: capability }
     spec:
+      serviceAccountName: mcporter
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: mcporter
-          image: registry.congty.vn/fleet/agent-runner:1.0.0
-          command: ["/fleet/capability-plane/bridge-up.sh"]
+          # Image RIÊNG, không dùng chung với agent-runner. Pod này giữ toàn bộ
+          # credential MCP của công ty; nó không có lý do gì để chứa sẵn `acpx`
+          # và `run-role.sh` — tức là chứa sẵn công cụ để chạy code tuỳ ý cạnh
+          # kho credential. Xem ADR-0002 §bối cảnh.
+          image: registry.congty.vn/fleet/mcporter:1.0.0
+          command: ["bash", "/fleet/capability-plane/bridge-up.sh"]
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }
@@ -32,9 +37,16 @@ spec:
           volumeMounts:
             - { name: config, mountPath: /home/node/.mcporter/mcporter.json, subPath: mcporter.json, readOnly: true }
             - { name: cache,  mountPath: /home/node/.cache/mcporter }
+          # `mcporter serve` KHÔNG có endpoint /healthz — kiểm bằng cổng TCP,
+          # giống hệt healthcheck trong docker-compose.yml. Bản trước dùng
+          # httpGet /healthz nên readiness không bao giờ xanh và Deployment
+          # không bao giờ sẵn sàng.
           readinessProbe:
-            httpGet: { path: /healthz, port: bridge }
+            tcpSocket: { port: bridge }
             periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: bridge }
+            periodSeconds: 30
           resources:
             requests: { cpu: 200m, memory: 512Mi }
             limits:   { cpu: "2",  memory: 2Gi }
