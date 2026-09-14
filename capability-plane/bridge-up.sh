@@ -61,7 +61,7 @@ if [[ -n "$TOKEN" ]]; then
     echo "[bridge] CẢNH BÁO: mcporter $(mcporter --version 2>/dev/null || echo '?') KHÔNG có cờ xác thực." >&2
     echo "[bridge] MCPORTER_BRIDGE_TOKEN đang được cấp nhưng KHÔNG có tác dụng." >&2
     echo "[bridge] Lớp bảo vệ DUY NHẤT của cầu nối lúc này là cách ly tầng mạng." >&2
-    echo "[bridge] Xem docs/adr/0002 trước khi mở thêm bất kỳ ai vào cổng $PORT." >&2
+    echo "[bridge] Đừng mở thêm ai vào cổng $PORT cho tới khi có xác thực thật." >&2
   fi
 else
   echo "[bridge] CẢNH BÁO: chưa đặt MCPORTER_BRIDGE_TOKEN — cầu nối không xác thực." >&2

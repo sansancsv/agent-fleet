@@ -41,20 +41,18 @@ thật sự giữ là 1 và 2.
 
 ### Tầng 4 (Kubernetes) yếu hơn bảng trên gợi ý
 
-Bảng trên mô tả trạng thái mong muốn. Rà soát 07/09/2026 tìm ra bốn chỗ lệch,
-tất cả đã sửa nhưng **chưa ai kiểm chứng trên cụm thật** (repo mới chạy Compose):
+Bảng trên mô tả trạng thái mong muốn; K8s manifest **chưa được kiểm chứng trên
+cụm thật** (repo mới chạy Compose). Bốn điểm cần kiểm khi apply lần đầu:
 
-- Bộ NetworkPolicy trước đây thiếu ingress cho `mcporter` và `langgraph`, thiếu
-  egress cho `langgraph` và gateway → apply lên là cụm không chạy. Nguy hiểm ở
-  chỗ: khi cụm không chạy, áp lực sửa nhanh thường dẫn tới việc ai đó nới policy
-  bằng tay ngoài git, và không ai biết.
-- `fleet-mcp-credentials` được tham chiếu nhưng chưa từng được định nghĩa.
-- SecretStore xác thực Vault bằng ServiceAccount của `agent-runner` — danh tính
-  mở kho secret trùng với danh tính của container chạy code do agent sinh ra.
-- `mcporter` dùng chung ảnh với `agent-runner`, tức là kho credential MCP nằm
-  cạnh `acpx`, `gh`, `git` và `run-role.sh`.
-
-Chi tiết và quyết định: `docs/adr/0002`.
+- Bộ NetworkPolicy phải có đủ ingress cho `mcporter` và `langgraph`, đủ egress
+  cho `langgraph` và gateway — thiếu một vế là cụm không chạy, và áp lực sửa
+  nhanh dễ dẫn tới việc ai đó nới policy bằng tay ngoài git.
+- `fleet-mcp-credentials` phải được định nghĩa trước khi tham chiếu.
+- SecretStore không nên xác thực Vault bằng ServiceAccount của `agent-runner` —
+  tránh để danh tính mở kho secret trùng với danh tính container chạy code do
+  agent sinh ra.
+- `mcporter` dùng ảnh riêng, tách khỏi `agent-runner`, để kho credential MCP
+  không nằm cạnh `acpx`, `gh`, `git` và `run-role.sh`.
 
 ### Cầu nối mcporter: cách ly mạng là lớp DUY NHẤT
 
@@ -76,15 +74,14 @@ những nhà cung cấp không phải backend của vai trò đang chạy — b�
 hại hạ từ ba nhà cung cấp xuống một. `validate.sh` bước 5d canh cho phần này
 không bị gỡ mất.
 
-**Đây là giảm thiểu, không phải bản vá**, và phạm vi hẹp hơn tưởng: rà soát
-07/09/2026 cho thấy `openclaw-gateway` **cũng** nhận cả ba khoá model và cũng
-chạy agent. Phần thu hẹp khoá chỉ nằm trên đường `run-role.sh` / `acpx_client`,
-nên **không bảo vệ đường của gateway**.
+**Đây là giảm thiểu, không phải bản vá**, và phạm vi hẹp hơn tưởng:
+`openclaw-gateway` **cũng** nhận cả ba khoá model và cũng chạy agent. Phần thu
+hẹp khoá chỉ nằm trên đường `run-role.sh` / `acpx_client`, nên **không bảo vệ
+đường của gateway**.
 
 Vậy có hai nơi khoá model nằm cạnh nơi chạy code, và mới bịt được một nửa của
 một nơi. Đích đến là proxy model giữ khoá riêng — cách duy nhất đóng cả hai
-bằng một thay đổi. Điều kiện kích hoạt ghi ở `docs/adr/0001`. Đừng đọc mục này
-như một vấn đề đã xử lý xong.
+bằng một thay đổi. Đừng đọc mục này như một vấn đề đã xử lý xong.
 
 ---
 
@@ -153,7 +150,7 @@ Hiện có năm nguồn, mỗi nguồn một nơi:
 |---|---|---|---|
 | Gateway OpenClaw | `config.d/security.json`: `logging.audit { enabled, executionIdentity, messages: "all" }` | volume `openclaw-audit` (`/home/node/.openclaw/audit`) | sự kiện run, tool call, tin nhắn — định dạng do OpenClaw quy định |
 | LangGraph | `server.py::_audit` | stdout container `langgraph` | `permission.decision`: ai duyệt/từ chối thread nào, được chấp nhận hay bị 403 |
-| LangGraph (bền) | `trajectory.permission_denied()`, gọi từ nhánh 403 của `run_resume()` | volume `fleet-logs` (NDJSON) | thêm từ 09/2026: trước đây một lượt bị 403 (sai người duyệt) **không để lại dấu vết nào ngoài dòng stdout ở trên** — vì `human_approval()` trong `graph.py` (nơi ghi `trajectory.approval()`) chỉ chạy sau khi `by` đã qua kiểm; nay mọi lượt 403 cũng có một dòng bền, độc lập với log container |
+| LangGraph (bền) | `trajectory.permission_denied()`, gọi từ nhánh 403 của `run_resume()` | volume `fleet-logs` (NDJSON) | mọi lượt bị 403 (sai người duyệt) ghi một dòng bền, độc lập với log container |
 | agent-runner | `runner/server.mjs::log` | stdout container `agent-runner` | mỗi lượt: route, role, mã HTTP, thời gian |
 | n8n | node "Ghi nhật ký kiểm toán" trong workflow 01 | **chỉ trong execution data của n8n** | requestId, requester, profile, nhánh |
 | Vết chạy | `fleet/trajectory.py` | volume `fleet-memory` + stdout `langgraph` | mỗi nút: thời gian, kết quả, số vòng sửa, **chữ ký** phát hiện |

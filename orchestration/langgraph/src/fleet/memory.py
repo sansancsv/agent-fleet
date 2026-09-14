@@ -10,15 +10,15 @@ Vì sao cần file này khi ĐÃ CÓ checkpointer PostgreSQL:
     là state, cái sau là memory. Thiếu cái sau thì ENG-1500 lặp lại đúng sai
     lầm của ENG-1421.
 
-Kiến trúc ba tầng (theo mục 3.5 của tien-hoa-agentic-patterns-vi.md):
+Kiến trúc ba tầng:
 
     cửa sổ ngữ cảnh  → mất sau mỗi request        (không quản ở đây)
     RAM              → mất khi tiến trình thoát   (FleetState + checkpointer)
     filesystem       → SỐNG SÓT QUA MỌI PHIÊN     ← file này
 
 Cố ý KHÔNG dùng vector database, không RAG pipeline. Markdown phẳng: người đọc
-được, người sửa được, agent tự cập nhật được, và `git diff` xem được. Ngưỡng để
-mở lại quyết định này nằm trong docs/06-doi-chieu-harness.md §3.
+được, người sửa được, agent tự cập nhật được, và `git diff` xem được. Chỉ đổi
+sang giải pháp khác khi markdown phẳng không còn đọc/tìm được nữa.
 
 BA RÀNG BUỘC BẮT BUỘC GIỮ KHI SỬA FILE NÀY
 ------------------------------------------
@@ -148,7 +148,7 @@ def append_step(task_id: str, node: str, note: str) -> None:
 def record_lesson(repo: str, lesson: str, *, task_id: str = "") -> bool:
     """Ghi một bài học vào bộ nhớ của repo. Trả về True nếu thực sự ghi mới.
 
-    Đây là nơi vòng lặp Hashimoto khép lại: agent gặp lỗi → nêu bài học ở
+    Đây là nơi vòng lặp bài học khép lại: agent gặp lỗi → nêu bài học ở
     trường `lesson:` → lượt sau đọc được. Bốn phép lọc, theo thứ tự:
 
       1. Rỗng hoặc quá ngắn  → bỏ (không phải bài học).

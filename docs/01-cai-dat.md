@@ -82,7 +82,7 @@ make audit              # rà soát bảo mật + test chính sách OPA
 plugin khi `control-plane/openclaw.json` dùng `$include` — mục này hiện **chưa
 làm được** trên repo ở dạng đang commit. Kênh vào thật đang dùng thay thế là
 webhook n8n (`make import-workflows` rồi xem `orchestration/n8n/workflows/01-intake-router.json`).
-Xem `docs/00-kien-truc.md` và `CLAUDE.md` mục "Bẫy cấu hình đã trả giá".
+Xem `docs/00-kien-truc.md` và `CLAUDE.md` mục "Bẫy cấu hình cần biết".
 
 ```bash
 docker compose -f deploy/docker/docker-compose.yml exec openclaw-gateway \

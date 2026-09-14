@@ -5,21 +5,18 @@
 #
 # 1. NetworkPolicy là CỘNG DỒN và HAI CHIỀU. Một gói tin từ A tới B chỉ đi được
 #    khi CẢ HAI điều kiện đúng: A có egress rule cho phép tới B, VÀ B có ingress
-#    rule cho phép từ A. Bản trước của file này chỉ có egress cho agent-runner
-#    mà không có ingress cho mcporter — nghĩa là cầu nối không ai gọi tới được,
-#    và langgraph thì không có egress nào ngoài DNS nên không chạm được cả
-#    agent-runner lẫn PostgreSQL. Bộ policy đó chưa từng được apply lên cụm thật
-#    (repo mới chạy Docker Compose), nên đây là lỗi tiềm ẩn, không phải sự cố.
+#    rule cho phép từ A. Thiếu một vế (ví dụ egress cho agent-runner mà thiếu
+#    ingress cho mcporter) là cụm im lặng không chạy — không có thông báo lỗi
+#    rõ ràng nào chỉ thẳng vào NetworkPolicy.
 #
 # 2. Không diễn đạt được tên miền. NetworkPolicy chỉ hiểu podSelector,
 #    namespaceSelector và ipBlock (CIDR). Mọi thứ kiểu "chỉ cho gọi
-#    api.anthropic.com" phải làm ở tầng khác — đó chính là lý do tồn tại của
-#    llm-egress-gateway trong ADR-0002.
+#    api.anthropic.com" phải làm ở tầng khác (xem `llm-egress-gateway` trong
+#    roadmap của `CLAUDE.md`).
 #
-# 3. Đây là lớp phòng thủ, KHÔNG phải lớp duy nhất. Sự cố Hugging Face 07/2026
-#    cho thấy một môi trường bị giới hạn mạng vẫn thoát được, bằng cách khai
-#    thác zero-day trong CHÍNH cái proxy được phép ra ngoài. Đọc ADR-0002 trước
-#    khi tin rằng file này đủ.
+# 3. Đây là lớp phòng thủ, KHÔNG phải lớp duy nhất — cách ly mạng làm chậm kẻ
+#    tấn công, không phải ranh giới tin cậy tuyệt đối. Một proxy được phép ra
+#    ngoài mà bị chiếm vẫn có thể trở thành đường thoát.
 #
 # Kiểm nhanh sau khi sửa:
 #   scripts/validate.sh bước 8d  — mọi Deployment phải được cả ingress lẫn
@@ -94,14 +91,15 @@ spec:
     - to: [{ podSelector: { matchLabels: { app: mcporter } } }]
       ports: [{ protocol: TCP, port: 7420 }]
     # Đích đến: mọi lời gọi model đi qua một gateway có ghi log và có hạn mức.
-    # Thành phần này CHƯA TỒN TẠI trong repo — xem ADR-0002 §phương án A.
+    # Thành phần này CHƯA TỒN TẠI trong repo (xem roadmap của CLAUDE.md).
     - to: [{ podSelector: { matchLabels: { app: llm-egress-gateway } } }]
       ports: [{ protocol: TCP, port: 8443 }]
     # ⚠️ TẠM THỜI — GỠ NGAY KHI CÓ llm-egress-gateway.
     # Chừng nào gateway đó chưa tồn tại, agent-runner phải tự gọi API model, tức
     # là phải ra được Internet. Rule này làm cụm chạy được, và đồng thời làm mất
     # phần lớn giá trị của việc "chỉ mcporter ra Internet": một agent bị dẫn dụ
-    # có đường mang dữ liệu đi. Khoảng hở đã biết, ghi ở ADR-0002.
+    # có đường mang dữ liệu đi. Khoảng hở đã biết — đây chính là lý do rule này
+    # được đánh dấu TẠM THỜI.
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0

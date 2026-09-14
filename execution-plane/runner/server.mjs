@@ -2,11 +2,9 @@
 // =============================================================================
 // runner/server.mjs — API HTTP của tầng thực thi (agent-runner)
 // -----------------------------------------------------------------------------
-// VÌ SAO CÓ FILE NÀY: trước đây n8n gọi run-role.sh bằng node executeCommand,
-// nghĩa là (a) lệnh chạy TRONG container n8n-worker, nơi không có acpx/python3,
-// và (b) nội dung webhook được ghép vào chuỗi shell — chèn lệnh thật sự.
-// Giờ tầng thực thi là một dịch vụ: mọi bên (n8n, LangGraph, gateway) gọi HTTP,
-// và dữ liệu ngoài đi vào argv của tiến trình con qua spawn(), KHÔNG qua shell.
+// Tầng thực thi là một dịch vụ HTTP: mọi bên (n8n, LangGraph, gateway) gọi
+// qua HTTP, và dữ liệu ngoài đi vào argv của tiến trình con qua spawn(),
+// KHÔNG bao giờ qua chuỗi shell — n8n không được phép dùng node executeCommand.
 //
 // Cố ý không dùng thư viện nào ngoài Node chuẩn: image agent-runner không cần
 // thêm bước cài, và bề mặt tấn công của chính dịch vụ này nhỏ nhất có thể.

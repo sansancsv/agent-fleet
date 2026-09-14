@@ -32,21 +32,18 @@ thật. Nếu hầu hết mục chỉ 1/3, tiêu chí thẩm định đang quá 
 ### Lấy số ở đâu
 
 `make metrics` (hoặc `GET /metrics` kèm token) đọc vết chạy trong
-`FLEET_TRAJECTORY_DIR` và in bảng bốn chỉ số của mục 3.8 trong
-`tien-hoa-agentic-patterns-vi.md`. Hai điều cần biết trước khi đọc bảng:
+`FLEET_TRAJECTORY_DIR` và in bảng bốn chỉ số. Hai điều cần biết trước khi đọc bảng:
 
 - **Chi phí token trả về `null`, không phải 0.** acpx chưa phơi số token nên
   chưa đo được; bảng báo các đại lượng thay thế (số lượt agent, thời gian, ký
-  tự đầu ra) và nói rõ vì sao thiếu. Xem điều kiện xem lại trong
-  `docs/adr/0001` — proxy model là chỗ tự nhiên để đếm token.
+  tự đầu ra) và nói rõ vì sao thiếu.
 - **Chưa có dữ liệu khác 0%.** Mọi tỉ lệ trả `null` khi mẫu số bằng 0. Nếu thấy
   "chưa có dữ liệu" ngay sau khi fleet đã chạy, kiểm `FLEET_TRAJECTORY_DIR` có
   được mount không.
 
 Mục "Phát hiện lặp lại nhiều nhất" ở cuối báo cáo là danh sách việc cần làm:
 mỗi dòng là một ràng buộc còn thiếu trong `_shared/AGENTS.md`. Thêm ràng buộc
-rồi tuần sau xem dòng đó có biến mất không — đó chính là cách kiểm chứng vòng
-lặp Hashimoto.
+rồi tuần sau xem dòng đó có biến mất không.
 
 ---
 
@@ -260,7 +257,7 @@ openclaw config schema | jq '.properties.agents.properties.defaults.properties |
 và âm thầm bỏ những khoá bạn cố ý đặt; lần deploy sau bạn sẽ không biết vì sao
 hành vi đổi. Sửa tay theo thông báo lỗi.
 
-Những khác biệt đã trả giá để biết (OpenClaw 2026.8.1):
+Khác biệt thường gặp giữa kỳ vọng và schema thật (OpenClaw 2026.8.1):
 
 | Tôi tưởng | Thực tế |
 |---|---|
@@ -367,11 +364,9 @@ Kiểm nhanh: `docker compose exec agent-runner curl -s localhost:8787/healthz`.
 
 ### `git push`/`git clone` từ agent-runner hoặc langgraph báo `Bad credentials` hoặc `Invalid username or token`
 
-Xác thực GitHub qua PAT/HTTPS trong container là loại lỗi **tốn thời gian nhất
-đã gặp** — token đúng, còn hạn, đủ quyền, nhưng vẫn "Bad credentials" không rõ
-nguyên nhân gốc (nghi do rate-limit thứ cấp hoặc phiên PAT bị treo phía
-GitHub, chưa có kết luận chắc chắn). **Đừng debug PAT lâu quá 10 phút** — chuyển
-thẳng sang SSH deploy key, ổn định hơn hẳn trong thực tế:
+Xác thực GitHub qua PAT/HTTPS trong container có thể báo "Bad credentials" dù
+token đúng, còn hạn, đủ quyền. **Đừng debug PAT lâu quá 10 phút** — chuyển
+thẳng sang SSH deploy key, ổn định hơn trong thực tế:
 
 ```bash
 ssh-keygen -t ed25519 -f deploy/docker/secrets/deploy_key_<repo> -N '' \
@@ -393,54 +388,21 @@ mỗi lần các container đó bị `recreate`** (kể cả chỉ rebuild lại
 
 ### LangGraph Studio (`langgraph dev`) không thấy thread nào
 
-Đừng dùng LangGraph Studio để duyệt task của fleet — **đã kiểm chứng bằng
-thực nghiệm ngày 14/09/2026, kết luận này đứng vững ở mức sâu hơn** những gì
-bản trước của mục này nói.
+Đừng dùng LangGraph Studio để duyệt task của fleet. `langgraph dev` chạy trên
+`langgraph_runtime_inmem` — một tầng sổ sách Threads/Runs/State hoàn toàn
+tách biệt, không đọc/ghi bảng `checkpoints` thật trong `FLEET_CHECKPOINT_DSN`,
+bất kể `langgraph.json` trỏ `graphs.fleet` vào biến thể nào. Đổi `thread_id`
+sang UUID không giải quyết được gì — đó không phải nguyên nhân.
 
-**Điều đã tưởng là nguyên nhân (chỉ đúng một phần):** `server.py` tự viết đi
-thẳng vào checkpointer bằng `thread_id` dạng chuỗi tuỳ ý (`REQ-XXXX`), còn
-Studio đòi UUID — `GET /threads/<task_id>/state` trả thẳng `"Invalid thread
-ID: must be a UUID"`. Đúng, nhưng đổi `task_id` sang định dạng UUID **không
-giải quyết được gì** — đó không phải nút thắt thật.
-
-**Nguyên nhân gốc, đã xác nhận bằng thực nghiệm:** `langgraph dev` khởi động
-với `langgraph_runtime_inmem` (thấy ngay trong log `Using
-langgraph_runtime_inmem` / `Starting In-Memory runtime`) — một tầng sổ sách
-Threads/Runs/State **hoàn toàn tách biệt**, không đọc/ghi vào bảng
-`checkpoints` thật trong `FLEET_CHECKPOINT_DSN`, **bất kể** `langgraph.json`
-trỏ `graphs.fleet` vào biến thể nào (`fleet.graph:graph` hay
-`fleet.graph:make_app` — factory dùng `AsyncPostgresSaver` thật). Ba phép
-thử trực tiếp trên cùng một `thread_id` dạng UUID, cùng một `FLEET_CHECKPOINT_DSN`:
-
-1. Ghi thẳng một checkpoint vào Postgres qua `build_graph(checkpointer=cp).aupdate_state(...)`
-   (đường mà production dùng) → `GET /threads/<uuid>/state` qua Studio (cổng
-   2024) trả `404 Thread ... not found`.
-2. Đăng ký cùng UUID đó qua `POST /threads` của Studio → tạo một thread
-   **rỗng mới** (`"values":null`), không gộp với checkpoint đã có.
-3. Ghi state mới qua `POST /threads/<uuid>/state` của Studio (trả về
-   `checkpoint_id` như thành công) → truy vấn thẳng bảng `checkpoints` trong
-   Postgres (`SELECT ... WHERE thread_id = ...`) chỉ thấy đúng **một** dòng —
-   dòng ghi ở bước 1; `checkpoint_id` Studio vừa trả về **không tồn tại**
-   trong bảng đó.
-
-Nói cách khác: dù `make_app()` có dựng `AsyncPostgresSaver` thật lúc nạp
-graph, tầng runtime của `dev` không dùng nó cho Threads/State — hai chiều
-đọc và ghi đều không chạm production Postgres. Đây là hạn chế của bản thân
-lệnh `langgraph dev`/gói `langgraph-api[inmem]`, không phải lỗi cấu hình có
-thể vá bằng cách đổi `langgraph.json` hay định dạng `task_id`.
-
-**Dùng Studio để làm gì thì được:** thuần công cụ phát triển cục bộ, ngắt
-hẳn khỏi state thật — xem cấu trúc đồ thị, hoặc tạo thread hoàn toàn mới bên
-trong Studio để dựng thủ công một trạng thái tổng hợp (qua `PATCH
-/threads/<id>` gắn `metadata.graph_id` rồi `POST .../state`) nhằm kiểm tra
-logic thuần tuý như `gate()`/`policies.py` — vẫn không thay thế được `make
-test`/pytest cho việc đó, và mọi node chạm git/GitHub/LLM thật (`prepare`,
-`implement`, `open_pr`) vẫn gây side-effect thật nếu bấm chạy trong Studio,
-"chế độ dev" không cô lập chuyện đó.
+**Dùng Studio để làm gì thì được:** thuần công cụ phát triển cục bộ, ngắt hẳn
+khỏi state thật — xem cấu trúc đồ thị, hoặc dựng thủ công một trạng thái tổng
+hợp bên trong Studio để kiểm logic thuần tuý như `gate()`/`policies.py` — vẫn
+không thay thế được `make test`. Mọi node chạm git/GitHub/LLM thật (`prepare`,
+`implement`, `open_pr`) vẫn gây side-effect thật nếu bấm chạy trong Studio.
 
 **Kênh duyệt thật, không đổi:** form n8n
-(`orchestration/n8n/workflows/04-duyet-task.json`, xem `docs/05` mục nhịp
-vận hành) hoặc gọi thẳng `/runs/<id>/resume`.
+(`orchestration/n8n/workflows/04-duyet-task.json`) hoặc gọi thẳng
+`/runs/<id>/resume`.
 
 ### Webhook GitHub gọi vào n8n luôn thất bại xác thực, dù đã đúng URL
 
@@ -467,9 +429,9 @@ dùng Named Tunnel (mục dưới) thay thế.
 
 ### Cloudflare Named Tunnel — ingress công khai ổn định (thay Quick Tunnel)
 
-Đã triển khai từ 09/2026: service `cloudflared` trong
-`deploy/docker/docker-compose.yml`, đứng sau Compose profile `"tunnel"` nên
-`make up` mặc định KHÔNG khởi động nó — chỉ chạy khi bật rõ ràng.
+Service `cloudflared` trong `deploy/docker/docker-compose.yml` đứng sau
+Compose profile `"tunnel"` nên `make up` mặc định KHÔNG khởi động nó — chỉ
+chạy khi bật rõ ràng.
 
 **Thiết lập một lần:**
 
@@ -529,8 +491,8 @@ Trường `by` không nằm trong `approvers` của hồ sơ gắn với thread 
 Đây là chủ đích: token API chứng minh "n8n gọi", không chứng minh "người có
 thẩm quyền đã duyệt". Sửa danh sách `approvers` trong hồ sơ, không nới API.
 Mọi lần duyệt/từ chối (kể cả bị 403) đều ghi một dòng `permission.decision`
-ra log của container `langgraph`, và từ 09/2026 lượt bị 403 còn ghi thêm một
-dòng bền `permission.denied` vào vết chạy (`FLEET_TRAJECTORY_DIR`) — xem
+ra log của container `langgraph`, và lượt bị 403 còn ghi thêm một dòng bền
+`permission.denied` vào vết chạy (`FLEET_TRAJECTORY_DIR`) — xem
 `docs/04-bao-mat.md` §5. `503` ở mọi endpoint nghĩa là thiếu
 `LANGGRAPH_TOKEN` — API đóng hoàn toàn cho tới khi có token.
 

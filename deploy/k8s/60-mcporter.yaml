@@ -21,7 +21,7 @@ spec:
           # Image RIÊNG, không dùng chung với agent-runner. Pod này giữ toàn bộ
           # credential MCP của công ty; nó không có lý do gì để chứa sẵn `acpx`
           # và `run-role.sh` — tức là chứa sẵn công cụ để chạy code tuỳ ý cạnh
-          # kho credential. Xem ADR-0002 §bối cảnh.
+          # kho credential.
           image: registry.congty.vn/fleet/mcporter:1.0.0
           command: ["bash", "/fleet/capability-plane/bridge-up.sh"]
           securityContext:

@@ -2,9 +2,8 @@
 =============================================================================
 VẾT CHẠY (trajectory) — ghi lại agent đã làm gì, để còn cải tiến được
 -----------------------------------------------------------------------------
-Mục 3.8 của tien-hoa-agentic-patterns-vi.md: "nếu không ghi lại được vết chạy
-của agent, bạn không thể biết nó hỏng ở đâu, và cũng không thể cải tiến bộ
-khung một cách có căn cứ."
+Không ghi lại được vết chạy của agent thì không thể biết nó hỏng ở đâu, và
+cũng không thể cải tiến bộ khung một cách có căn cứ.
 
 Repo này đã có audit của gateway (ai gọi tool gì) và `permission.decision` của
 LangGraph (ai duyệt cái gì). Cả hai trả lời câu hỏi KIỂM TOÁN. Không cái nào
@@ -14,7 +13,7 @@ lặp lại không". Vết chạy trả lời nhóm câu hỏi thứ hai.
 
 Định dạng: NDJSON, một dòng một sự kiện, một file một ngày. Cố ý không dùng
 CSDL: file phẳng đọc được bằng `jq`, `grep`, pandas, và không thêm một dịch vụ
-phải vận hành. Khi nào không đủ thì đổi — ngưỡng ghi trong docs/06 §3.
+phải vận hành. Chỉ đổi sang CSDL khi truy vấn phẳng không còn đủ.
 
 MỌI THỨ Ở ĐÂY ĐỀU FAIL-SOFT. Ghi vết chạy hỏng không được phép làm hỏng một
 lượt giao hàng tính năng. Xem `_append()`.

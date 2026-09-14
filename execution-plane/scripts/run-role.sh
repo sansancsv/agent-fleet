@@ -46,8 +46,7 @@ done
 #
 # Không gỡ được khoá của backend đang dùng — acpx cần nó để gọi model. Nhưng gỡ
 # được hai khoá còn lại: bán kính thiệt hại hạ từ ba nhà cung cấp xuống một.
-# Đây là giảm thiểu, KHÔNG phải bản vá đầy đủ — xem
-# docs/adr/0001-tach-khoa-model-khoi-container-chay-code.md
+# Đây là giảm thiểu, KHÔNG phải bản vá đầy đủ.
 #
 # Bản sao của logic này nằm ở `acpx_client.provider_env()` (nhánh chạy tại chỗ
 # cho dev/test). Hai chỗ phải khớp; scripts/validate.sh bước 5d kiểm điều đó.

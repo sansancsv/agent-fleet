@@ -1,9 +1,7 @@
 """Kiểm thử phần thu hẹp khoá model theo backend.
 
 Vì sao phần này đáng có test riêng: nó là một biện pháp BẢO MẬT, và biện pháp
-bảo mật chỉ tồn tại trong tài liệu là biện pháp không tồn tại. Xem
-docs/adr/0001-tach-khoa-model-khoi-container-chay-code.md để biết vì sao chỉ
-thu hẹp mà chưa tách hẳn.
+bảo mật chỉ tồn tại trong tài liệu là biện pháp không tồn tại.
 
 Bản sao của cùng logic nằm ở `execution-plane/scripts/run-role.sh`;
 `scripts/validate.sh` bước 5d canh cho hai bên không lệch nhau.

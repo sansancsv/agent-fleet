@@ -77,7 +77,7 @@ for f in orchestration/n8n/workflows/*.json; do
 done
 
 # --- 5d. Khoá model phải được thu hẹp theo backend --------------------------
-# Xem docs/adr/0001. acpx truyền môi trường xuống MỌI tiến trình con, kể cả lệnh
+# acpx truyền môi trường xuống MỌI tiến trình con, kể cả lệnh
 # do chính agent quyết định chạy — nên một lượt `implementer` không được nhìn
 # thấy khoá của nhà cung cấp mà nó không dùng. Logic này tồn tại ở HAI nơi
 # (shell và Python) và cả hai đều dễ bị gỡ mất trong một lần refactor vô tình.
@@ -89,7 +89,7 @@ AC=orchestration/langgraph/src/fleet/acpx_client.py
 if grep -q 'unset "ACPX_AUTH_${PROVIDER}_API_KEY"' "$RR"; then
   pass "$RR gỡ khoá của nhà cung cấp không dùng"
 else
-  fail "$RR KHÔNG còn gỡ khoá model — đọc docs/adr/0001 trước khi bỏ phần này"
+  fail "$RR KHÔNG còn gỡ khoá model — đây là biện pháp bảo mật, đừng bỏ"
 fi
 if grep -q 'def provider_env' "$AC" && grep -q 'provider_env(backend)' "$AC"; then
   pass "$AC có provider_env() và thực sự dùng nó"
@@ -249,8 +249,7 @@ fi
 
 # --- 8d. K8s: tham chiếu treo và NetworkPolicy thiếu -------------------------
 # Đây là loại lỗi chỉ lộ ra lúc `kubectl apply` lên cụm thật, tức là lúc đắt
-# nhất để phát hiện. Ba lỗi bắt được ở đây đều đã có thật trong repo này
-# (rà soát 07/09/2026, xem docs/adr/0002):
+# nhất để phát hiện. Ba lỗi phòng ở đây:
 #   1. `fleet-mcp-credentials` được envFrom nhưng chưa từng được định nghĩa
 #      → pod kẹt CreateContainerConfigError.
 #   2. default-deny chặn cả hai chiều nhưng thiếu ingress cho mcporter và

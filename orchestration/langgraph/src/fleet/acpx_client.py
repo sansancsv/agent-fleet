@@ -49,9 +49,7 @@ ROLE_BACKENDS: dict[str, tuple[str, Permission]] = {
 
 # Backend acpx -> tiền tố biến môi trường chứa khoá của nhà cung cấp đó.
 # Dùng để THU HẸP khoá: một lượt chạy `claude` không có lý do gì được nhìn thấy
-# khoá OpenAI và Gemini. Xem docs/adr/0001 — đây là phần giảm bán kính thiệt
-# hại làm được ngay, không phải là bản vá đầy đủ cho việc khoá nằm cùng
-# container với code do agent sinh ra.
+# khoá OpenAI và Gemini — giảm bán kính thiệt hại nếu lượt đó bị chèn lệnh.
 BACKEND_PROVIDER: dict[str, str] = {
     "claude": "ANTHROPIC",
     "codex": "OPENAI",

@@ -1,15 +1,11 @@
 """
 =============================================================================
-BỐN CHỈ SỐ VẬN HÀNH — điền vào bảng còn trống ở mục 3.8 của tài liệu
+BỐN CHỈ SỐ VẬN HÀNH — tính từ vết chạy trong fleet.trajectory
 -----------------------------------------------------------------------------
-Tài liệu tien-hoa-agentic-patterns-vi.md để sẵn một bảng trống với ghi chú:
-"để điền số đo thật từ hệ thống của mình, thay vì đi mượn số của người khác."
-File này tính đúng bốn chỉ số đó từ vết chạy trong fleet.trajectory.
-
   1. Tỉ lệ hoàn thành phiên dài   — % phiên > 1h kết thúc thành công
   2. Chi phí trung bình / tác vụ  — token + hạ tầng
   3. Tỉ lệ can thiệp của người    — % quy trình cần người quyết định
-  4. Lỗi lặp lại                  — kiểm chứng cách làm của Hashimoto
+  4. Lỗi lặp lại                  — phát hiện nào lặp lại nhiều nhất giữa các lượt
 
 MỘT ĐIỀU PHẢI NÓI THẲNG VỀ CHỈ SỐ 2
 -----------------------------------
@@ -98,8 +94,8 @@ def collect(days: int = 30, directory: Path | None = None) -> dict[str, Any]:
 
     # --- 4. Lỗi lặp lại ------------------------------------------------------
     # Một chữ ký xuất hiện ở >1 công việc = ràng buộc hiện có chưa chặn được nó.
-    # Đây chính là phép kiểm chứng cách làm của Hashimoto: sau khi thêm một dòng
-    # vào AGENTS.md, chữ ký tương ứng phải ngừng xuất hiện ở các công việc mới.
+    # Sau khi thêm một dòng vào AGENTS.md, chữ ký tương ứng phải ngừng xuất
+    # hiện ở các công việc mới — đó là cách kiểm chứng ràng buộc mới có tác dụng.
     repeated = {s: sorted(t) for s, t in signature_tasks.items() if len(t) > 1}
 
     return {

@@ -4,20 +4,15 @@
 # VÌ SAO TÁCH KHỎI Dockerfile.agent-runner
 #
 # Pod này giữ TOÀN BỘ credential MCP của công ty: token GitHub, token Grafana,
-# DSN kho dữ liệu, OAuth Notion/Linear/Drive, client secret HubSpot. Trước đây
-# nó dùng chung ảnh với agent-runner, nghĩa là cạnh kho credential đó có sẵn
-# `acpx`, ba backend agent, `gh`, `git`, `build-essential` và `run-role.sh` —
-# tức là đủ đồ nghề để chạy code tuỳ ý và mang dữ liệu đi.
-#
-# Sự cố Hugging Face 07/2026 đi đúng đường đó: thoát ra qua chính cái proxy được
-# phép ra Internet, rồi thu hoạch credential và di chuyển ngang. Ảnh này tồn tại
-# để nếu cầu nối bị chiếm, kẻ chiếm được nhận một môi trường trống.
+# DSN kho dữ liệu, OAuth Notion/Linear/Drive, client secret HubSpot. Ảnh dùng
+# chung với agent-runner sẽ đặt kho credential đó cạnh `acpx`, ba backend
+# agent, `gh`, `git`, `build-essential` và `run-role.sh` — đủ đồ nghề để chạy
+# code tuỳ ý và mang dữ liệu đi nếu cầu nối bị chiếm. Ảnh riêng này đảm bảo
+# nếu cầu nối bị chiếm, kẻ chiếm được nhận một môi trường trống.
 #
 # NGUYÊN TẮC: chỉ cài thứ `mcporter serve` thật sự cần. Mỗi lần thêm một dòng
 # vào đây, hãy hỏi "công cụ này giúp gì cho việc chuyển tiếp lời gọi MCP?" —
 # nếu câu trả lời là "không, nó tiện khi debug" thì đừng thêm.
-#
-# Xem: docs/adr/0002-mot-cua-ra-internet-va-credential-dat-canh-cong-cu.md
 # =============================================================================
 FROM node:24-bookworm-slim
 

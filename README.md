@@ -151,8 +151,6 @@ Chi tiết: `docs/03-mo-rong-phong-ban.md`.
 | `docs/03-mo-rong-phong-ban.md` | Mở rộng ra ngoài phòng kỹ thuật |
 | `docs/04-bao-mat.md` | Mô hình mối đe doạ, phân quyền, secret, kiểm toán |
 | `docs/05-runbook.md` | Vận hành hằng ngày, sự cố thường gặp |
-| `docs/06-doi-chieu-harness.md` | Bảng chấm bảy lớp harness — chỗ nào theo kịp xu thế, chỗ nào còn trống |
-| `docs/adr/` | Biên bản quyết định kiến trúc (khuôn mẫu ở skill `fleet-adr`) |
 | `docs/99-thuat-ngu.md` | Đối chiếu thuật ngữ Anh–Việt |
 
 ---

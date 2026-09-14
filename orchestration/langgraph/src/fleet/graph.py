@@ -82,7 +82,7 @@ def _after_turn(
 ) -> None:
     """Chạy sau MỖI lượt agent: ghi tiến độ, ghi vết chạy, thu bài học.
 
-    Đây là chỗ vòng lặp Hashimoto khép lại. Agent chỉ *nêu* bài học qua trường
+    Đây là chỗ vòng lặp bài học khép lại. Agent chỉ *nêu* bài học qua trường
     `lesson:` trong khối fleet-status; hàm này *quyết định* có ghi hay không.
     Nếu để agent tự ghi file bộ nhớ thì (a) mất tính xác định, (b) bộ nhớ thành
     nơi agent tự cấp thêm chỉ dẫn cho chính mình ở lượt sau.

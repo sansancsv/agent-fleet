@@ -1,6 +1,6 @@
 """Kiểm thử tầng API của bộ điều phối.
 
-Ba thứ được kiểm ở đây, và cả ba đều là chỗ đã từng hỏng thật:
+Ba thứ được kiểm ở đây:
 
   1. Server khởi động được bằng uvicorn (gói `langgraph` KHÔNG có lệnh
      `langgraph`; `langgraph up` dựng Docker Compose nên không dùng trong

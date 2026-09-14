@@ -12,7 +12,7 @@
   "//nonInteractive2": "an toàn hơn 'deny' (âm thầm bỏ qua) vì buộc quy trình phải xử lý.",
   "nonInteractivePermissions": "fail",
 
-  "//authPolicy": "'skip' — KHÔNG phải 'fail' như ý định ban đầu. Lý do (đã kiểm chứng bằng phiên Claude thật): @zed-industries/claude-code-acp 0.16.2 chỉ quảng bá auth method 'claude-login' (đăng nhập tương tác) và hàm authenticate() của nó CHƯA CÀI ĐẶT (luôn throw). acpx tự chặn TRƯỚC khi thử, báo 'no matching credentials found', dù ACPX_AUTH_ANTHROPIC_API_KEY hợp lệ và SDK bên dưới dùng được key đó bình thường (đã xác minh: lỗi thật sự nhận được là lỗi billing của Anthropic, không phải lỗi xác thực). 'fail' làm backend claude — dùng cho 5/9 vai trò — KHÔNG BAO GIỜ chạy được, bất kể credential đúng hay sai. 'skip' bỏ bước tiền kiểm; lỗi credential thật (sai key, hết credit) vẫn hiện rõ ở bước prompt qua thông báo lỗi của chính nhà cung cấp, chỉ trễ hơn.",
+  "//authPolicy": "PHẢI là 'skip', không phải 'fail'. @zed-industries/claude-code-acp chỉ quảng bá auth method 'claude-login' và authenticate() của nó chưa cài đặt (luôn throw) — 'fail' sẽ làm backend claude (5/9 vai trò) không bao giờ chạy được dù credential đúng. 'skip' bỏ bước tiền kiểm; lỗi credential thật vẫn hiện rõ ở bước prompt qua thông báo lỗi của nhà cung cấp, chỉ trễ hơn.",
   "authPolicy": "skip",
 
   "//format": "json = NDJSON các thông điệp ACP thô, để n8n/LangGraph phân tích.",

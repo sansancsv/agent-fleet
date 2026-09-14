@@ -66,7 +66,6 @@ services:
       context: ../..
       # Ảnh RIÊNG, không dùng chung với agent-runner: pod này giữ toàn bộ
       # credential MCP nên không được chứa sẵn acpx/gh/git/run-role.sh.
-      # Xem docs/adr/0002 và deploy/docker/Dockerfile.mcporter.
       dockerfile: deploy/docker/Dockerfile.mcporter
     restart: unless-stopped
     # Gọi qua bash thay vì chạy trực tiếp: bit thực thi (+x) hay bị mất khi
@@ -78,7 +77,7 @@ services:
       MCPORTER_BRIDGE_BIND: "0.0.0.0"
       # Chỉ có tác dụng nếu bản mcporter đang cài hỗ trợ cờ xác thực; bridge-up.sh
       # dò lúc chạy và ghi rõ ra log khi không bật được. Để trống cũng chạy được,
-      # nhưng lúc đó cách ly tầng mạng là lớp bảo vệ duy nhất — xem docs/adr/0002.
+      # nhưng lúc đó cách ly tầng mạng là lớp bảo vệ duy nhất.
       MCPORTER_BRIDGE_TOKEN: ${MCPORTER_BRIDGE_TOKEN:-}
       GITHUB_MCP_TOKEN: ${GITHUB_MCP_TOKEN:-}
       GRAFANA_MCP_URL: ${GRAFANA_MCP_URL:-}
