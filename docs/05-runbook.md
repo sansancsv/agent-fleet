@@ -393,14 +393,54 @@ mỗi lần các container đó bị `recreate`** (kể cả chỉ rebuild lại
 
 ### LangGraph Studio (`langgraph dev`) không thấy thread nào
 
-Đừng dùng LangGraph Studio để duyệt task của fleet — đã thử và không dùng
-được. `server.py` tự viết đi thẳng vào checkpointer bằng `thread_id` dạng
-chuỗi tuỳ ý (`REQ-XXXX`), bỏ qua hẳn "Threads API" chuẩn của LangGraph
-Platform mà Studio dựa vào. Studio quản lý thread bằng UUID riêng của nó;
-`GET /threads/<task_id>/state` trả thẳng `"Invalid thread ID: must be a
-UUID"`. Hai không gian ID khác nhau, dù trỏ chung một Postgres. Kênh duyệt
-thật là form n8n (`orchestration/n8n/workflows/04-duyet-task.json`, xem
-`docs/05` mục nhịp vận hành) hoặc gọi thẳng `/runs/<id>/resume`.
+Đừng dùng LangGraph Studio để duyệt task của fleet — **đã kiểm chứng bằng
+thực nghiệm ngày 14/09/2026, kết luận này đứng vững ở mức sâu hơn** những gì
+bản trước của mục này nói.
+
+**Điều đã tưởng là nguyên nhân (chỉ đúng một phần):** `server.py` tự viết đi
+thẳng vào checkpointer bằng `thread_id` dạng chuỗi tuỳ ý (`REQ-XXXX`), còn
+Studio đòi UUID — `GET /threads/<task_id>/state` trả thẳng `"Invalid thread
+ID: must be a UUID"`. Đúng, nhưng đổi `task_id` sang định dạng UUID **không
+giải quyết được gì** — đó không phải nút thắt thật.
+
+**Nguyên nhân gốc, đã xác nhận bằng thực nghiệm:** `langgraph dev` khởi động
+với `langgraph_runtime_inmem` (thấy ngay trong log `Using
+langgraph_runtime_inmem` / `Starting In-Memory runtime`) — một tầng sổ sách
+Threads/Runs/State **hoàn toàn tách biệt**, không đọc/ghi vào bảng
+`checkpoints` thật trong `FLEET_CHECKPOINT_DSN`, **bất kể** `langgraph.json`
+trỏ `graphs.fleet` vào biến thể nào (`fleet.graph:graph` hay
+`fleet.graph:make_app` — factory dùng `AsyncPostgresSaver` thật). Ba phép
+thử trực tiếp trên cùng một `thread_id` dạng UUID, cùng một `FLEET_CHECKPOINT_DSN`:
+
+1. Ghi thẳng một checkpoint vào Postgres qua `build_graph(checkpointer=cp).aupdate_state(...)`
+   (đường mà production dùng) → `GET /threads/<uuid>/state` qua Studio (cổng
+   2024) trả `404 Thread ... not found`.
+2. Đăng ký cùng UUID đó qua `POST /threads` của Studio → tạo một thread
+   **rỗng mới** (`"values":null`), không gộp với checkpoint đã có.
+3. Ghi state mới qua `POST /threads/<uuid>/state` của Studio (trả về
+   `checkpoint_id` như thành công) → truy vấn thẳng bảng `checkpoints` trong
+   Postgres (`SELECT ... WHERE thread_id = ...`) chỉ thấy đúng **một** dòng —
+   dòng ghi ở bước 1; `checkpoint_id` Studio vừa trả về **không tồn tại**
+   trong bảng đó.
+
+Nói cách khác: dù `make_app()` có dựng `AsyncPostgresSaver` thật lúc nạp
+graph, tầng runtime của `dev` không dùng nó cho Threads/State — hai chiều
+đọc và ghi đều không chạm production Postgres. Đây là hạn chế của bản thân
+lệnh `langgraph dev`/gói `langgraph-api[inmem]`, không phải lỗi cấu hình có
+thể vá bằng cách đổi `langgraph.json` hay định dạng `task_id`.
+
+**Dùng Studio để làm gì thì được:** thuần công cụ phát triển cục bộ, ngắt
+hẳn khỏi state thật — xem cấu trúc đồ thị, hoặc tạo thread hoàn toàn mới bên
+trong Studio để dựng thủ công một trạng thái tổng hợp (qua `PATCH
+/threads/<id>` gắn `metadata.graph_id` rồi `POST .../state`) nhằm kiểm tra
+logic thuần tuý như `gate()`/`policies.py` — vẫn không thay thế được `make
+test`/pytest cho việc đó, và mọi node chạm git/GitHub/LLM thật (`prepare`,
+`implement`, `open_pr`) vẫn gây side-effect thật nếu bấm chạy trong Studio,
+"chế độ dev" không cô lập chuyện đó.
+
+**Kênh duyệt thật, không đổi:** form n8n
+(`orchestration/n8n/workflows/04-duyet-task.json`, xem `docs/05` mục nhịp
+vận hành) hoặc gọi thẳng `/runs/<id>/resume`.
 
 ### Webhook GitHub gọi vào n8n luôn thất bại xác thực, dù đã đúng URL
 
@@ -423,7 +463,65 @@ tiến trình `cloudflared` vẫn chạy. Đây không phải sự cố mạng c
 sửa được bằng cách chờ; phải `pkill cloudflared` rồi khởi động lại để nhận
 URL `*.trycloudflare.com` **mới**, và phải cập nhật lại secret
 `FLEET_WEBHOOK_URL` phía GitHub Actions. Không phải giải pháp production —
-xem lộ trình.
+dùng Named Tunnel (mục dưới) thay thế.
+
+### Cloudflare Named Tunnel — ingress công khai ổn định (thay Quick Tunnel)
+
+Đã triển khai từ 09/2026: service `cloudflared` trong
+`deploy/docker/docker-compose.yml`, đứng sau Compose profile `"tunnel"` nên
+`make up` mặc định KHÔNG khởi động nó — chỉ chạy khi bật rõ ràng.
+
+**Thiết lập một lần:**
+
+1. Tạo tunnel trên Cloudflare Zero Trust dashboard: Networks → Tunnels →
+   Create a tunnel → chọn "Cloudflared" → đặt tên → bước "Install connector"
+   chọn hệ điều hành "Docker" — dashboard đưa ra một lệnh dạng
+   `docker run cloudflare/cloudflared:latest tunnel run --token eyJ...`.
+   Chỉ cần lấy phần TOKEN (chuỗi sau `--token`), không cần chạy lệnh đó —
+   compose của repo đã có sẵn service tương đương.
+2. Thêm vào `.env` (không commit):
+   ```
+   CLOUDFLARE_TUNNEL_TOKEN=<token vừa lấy>
+   ```
+3. Ở cùng bước tạo tunnel, tab **Public Hostname**: khai domain công khai trỏ
+   vào dịch vụ nào trong compose. Đây là cấu hình phía Cloudflare, KHÔNG có
+   file ingress cục bộ nào trong repo phải sửa — vì token chạy ở chế độ
+   "remotely-managed". Ví dụ:
+   | Public hostname | Service |
+   |---|---|
+   | `n8n.miền-của-bạn.com` | `http://n8n:5678` |
+   | `fleet-hooks.miền-của-bạn.com` | `http://openclaw-gateway:18789` |
+
+   `cloudflared` nằm chung mạng Docker mặc định của project `agent-fleet` nên
+   phân giải được tên dịch vụ compose (`n8n`, `openclaw-gateway`, ...) mà
+   không cần map cổng ra host — cổng `127.0.0.1:*` hiện có trong compose vẫn
+   chỉ để debug từ máy host, không liên quan tới đường đi của tunnel.
+
+   **Đừng** trỏ hostname công khai thẳng vào n8n nếu nó lộ luôn giao diện quản
+   trị (`/`, `/rest/*`) — hoặc chỉ public đúng path webhook, hoặc đặt
+   Cloudflare Access trước hostname đó. `openclaw-gateway` tự đòi
+   `hooks.token` (xem `control-plane/config.d/channels.json`) nên path
+   `/hooks/*` đã có một lớp xác thực riêng, nhưng thu hẹp thêm ở tầng
+   Cloudflare Access vẫn nên làm — đúng nguyên tắc "một quyền bị chặn ở ít
+   nhất hai tầng" của repo này.
+
+**Vận hành hằng ngày:**
+
+```bash
+make tunnel-up     # bật (đọc CLOUDFLARE_TUNNEL_TOKEN từ .env)
+make tunnel-logs   # xem đã kết nối chưa — tìm dòng "Registered tunnel connection"
+make tunnel-down   # tắt
+```
+
+Image `cloudflared` là distroless (không có `sh`/`curl`/`wget` bên trong) nên
+service này KHÔNG có `healthcheck` trong compose — `make health` không kiểm
+tra nó. Xác nhận tunnel sống bằng `make tunnel-logs` hoặc bằng cách gọi thẳng
+domain công khai.
+
+Nếu `make tunnel-up` báo thiếu biến bắt buộc: `CLOUDFLARE_TUNNEL_TOKEN` chưa
+có trong `.env`, làm lại bước 2. Nếu log lặp lại lỗi xác thực (`Unauthorized`),
+token đã bị revoke trên dashboard (tunnel bị xoá, hoặc token được cấp lại) —
+lấy token mới, không sửa được bằng cách khởi động lại container.
 
 ### LangGraph trả `403` khi duyệt (`/runs/<id>/resume`)
 

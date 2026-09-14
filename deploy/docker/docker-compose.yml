@@ -351,6 +351,49 @@ services:
       replicas: ${N8N_WORKER_REPLICAS:-2}
     logging: *logging
 
+  # ---------------------------------------------------------------------------
+  # INGRESS CÔNG KHAI (TUỲ CHỌN) — Cloudflare Named Tunnel
+  # ---------------------------------------------------------------------------
+  # KHÔNG chạy cùng `make up`: đứng sau profile "tunnel" nên mặc định đứng im,
+  # bật bằng `make tunnel-up`. Đây là bản thay thế cho Cloudflare Quick Tunnel
+  # (`cloudflared tunnel --url ...`) đã ghi nhận là KHÔNG ổn định ở
+  # docs/05-runbook.md §"Webhook GitHub... Quick Tunnel" — Quick Tunnel không
+  # có tài khoản, sinh URL ngẫu nhiên, và có thể chết bất cứ lúc nào kèm
+  # "Unauthorized: Tunnel not found" dù tiến trình vẫn sống. Named Tunnel gắn
+  # với một tài khoản Cloudflare cố định, dùng TOKEN xác thực nên không có vấn
+  # đề đó.
+  #
+  # Cơ chế: token của Named Tunnel (Cloudflare Zero Trust → Networks → Tunnels
+  # → chọn tunnel → Install connector → Docker) chỉ xác thực container này với
+  # Cloudflare; việc "domain X trỏ vào dịch vụ nào trong compose" được cấu hình
+  # ở tab "Public Hostname" trên dashboard đó — KHÔNG có file YAML ingress cục
+  # bộ nào trong repo phải sửa. Điền hostname công khai, trỏ Service tới
+  # "http://<tên-dịch-vụ-compose>:<cổng-nội-bộ>" — ví dụ:
+  #   n8n.miền-của-bạn.com          → http://n8n:5678
+  #   fleet-hooks.miền-của-bạn.com  → http://openclaw-gateway:18789
+  # cloudflared nằm chung mạng Docker mặc định của project này nên phân giải
+  # được tên dịch vụ mà không cần map cổng ra host.
+  #
+  # CẢNH BÁO: đừng trỏ hostname công khai thẳng vào n8n nếu nó lộ luôn giao
+  # diện quản trị — chỉ nên public đúng path webhook cần, hoặc đặt Cloudflare
+  # Access trước hostname đó. openclaw-gateway tự có `hooks.token` bắt buộc
+  # (control-plane/config.d/channels.json) nên path /hooks/* đã có một lớp
+  # xác thực riêng, nhưng vẫn nên giới hạn ở tầng Cloudflare Access nếu có thể.
+  cloudflared:
+    # GHIM PHIÊN BẢN — image này không có shell/curl/wget bên trong (distroless),
+    # nên healthcheck không viết được bằng CMD-SHELL; theo dõi bằng
+    # `make tunnel-logs` (tìm dòng "Registered tunnel connection").
+    image: cloudflare/cloudflared:2026.9.0
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      # Named Tunnel dùng TOKEN xác thực, KHÔNG dùng credentials.json cục bộ.
+      # Lấy token ở bước "Install connector → Docker" trên dashboard tunnel đó.
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?bắt buộc khi bật profile "tunnel" — lấy ở Cloudflare Zero Trust → Networks → Tunnels}
+    logging: *logging
+
 volumes:
   openclaw-audit:
   pgdata:

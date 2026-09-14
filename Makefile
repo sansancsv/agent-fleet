@@ -128,3 +128,17 @@ demo-review:  ## Chạy thử thẩm định chéo ba model
 setup-github-ssh:  ## Cài deploy key SSH vào agent-runner (chạy lại sau mỗi lần agent-runner bị recreate)
 	bash deploy/docker/secrets/setup_deploy_key.sh
 	bash deploy/docker/secrets/setup_git_ssh.sh
+
+# --- Ingress công khai (tuỳ chọn) --------------------------------------------
+.PHONY: tunnel-up
+tunnel-up:  ## Bật Cloudflare Named Tunnel (cần CLOUDFLARE_TUNNEL_TOKEN trong .env)
+	$(COMPOSE) --profile tunnel up -d cloudflared
+	@echo "Xem trạng thái kết nối: make tunnel-logs"
+
+.PHONY: tunnel-down
+tunnel-down:  ## Tắt Cloudflare Named Tunnel
+	$(COMPOSE) --profile tunnel stop cloudflared
+
+.PHONY: tunnel-logs
+tunnel-logs:  ## Theo dõi log tunnel (tìm dòng "Registered tunnel connection")
+	$(COMPOSE) --profile tunnel logs -f cloudflared
