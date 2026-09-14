@@ -87,6 +87,10 @@ Trong `control-plane/config.d/channels.json` thêm một `accountId`, và trong
 `bindings.json` thêm một luật định tuyến. Bot riêng cho mỗi phòng ban là điều
 kiện để phân quyền và tính chi phí tách bạch.
 
+⚠️ Kênh Slack cho OpenClaw hiện chưa bật được trên bản CLI đang dùng (xem
+`docs/00-kien-truc.md`). Thay thế tạm thời: một Form Trigger hoặc Webhook
+Trigger riêng trong n8n cho mỗi phòng ban, gọi cùng `dept-request.flow.ts`.
+
 ### Bước 4 — Kiểm chứng
 ```bash
 ./scripts/validate.sh

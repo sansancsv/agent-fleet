@@ -56,6 +56,15 @@ Ranh giới rõ nghĩa là: **đổi một tầng không phải sửa ba tầng 
    LangGraph và log từng lượt của agent-runner — xem docs/04 §5
 ```
 
+**Đừng đọc bước 1–2 thành "kênh vào chính là Slack".** `openclaw plugins
+install` từ chối ghi cấu hình plugin khi cấu hình gốc dùng `$include` (giới
+hạn của CLI ở bản đang dùng, không phải lỗi cấu hình của repo này — xem
+`CLAUDE.md` mục "Bẫy cấu hình đã trả giá") — nên kênh Slack cho OpenClaw
+**hiện chưa bật được**. Đường vào thật đang dùng là webhook n8n
+(`orchestration/n8n/workflows/01-intake-router.json`), không đi qua OpenClaw
+Gateway ở bước 2. Sơ đồ trên vẫn đúng là *thiết kế đích*; chỉ chưa đúng là
+*đường đang chạy*.
+
 Điểm cần chú ý ở bước 4: **mọi lần agent chạm vào hệ thống ngoài đều đi qua
 mcporter**. Đó là lý do có tầng năng lực: một chỗ giám sát, một chỗ thu hồi
 quyền, một chỗ giữ credential.

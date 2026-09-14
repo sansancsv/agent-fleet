@@ -153,6 +153,7 @@ Hiện có năm nguồn, mỗi nguồn một nơi:
 |---|---|---|---|
 | Gateway OpenClaw | `config.d/security.json`: `logging.audit { enabled, executionIdentity, messages: "all" }` | volume `openclaw-audit` (`/home/node/.openclaw/audit`) | sự kiện run, tool call, tin nhắn — định dạng do OpenClaw quy định |
 | LangGraph | `server.py::_audit` | stdout container `langgraph` | `permission.decision`: ai duyệt/từ chối thread nào, được chấp nhận hay bị 403 |
+| LangGraph (bền) | `trajectory.permission_denied()`, gọi từ nhánh 403 của `run_resume()` | volume `fleet-logs` (NDJSON) | thêm từ 09/2026: trước đây một lượt bị 403 (sai người duyệt) **không để lại dấu vết nào ngoài dòng stdout ở trên** — vì `human_approval()` trong `graph.py` (nơi ghi `trajectory.approval()`) chỉ chạy sau khi `by` đã qua kiểm; nay mọi lượt 403 cũng có một dòng bền, độc lập với log container |
 | agent-runner | `runner/server.mjs::log` | stdout container `agent-runner` | mỗi lượt: route, role, mã HTTP, thời gian |
 | n8n | node "Ghi nhật ký kiểm toán" trong workflow 01 | **chỉ trong execution data của n8n** | requestId, requester, profile, nhánh |
 | Vết chạy | `fleet/trajectory.py` | volume `fleet-memory` + stdout `langgraph` | mỗi nút: thời gian, kết quả, số vòng sửa, **chữ ký** phát hiện |
@@ -173,6 +174,14 @@ Ba câu hỏi kiểm toán viên luôn hỏi, và nguồn trả lời:
 Việc còn thiếu, theo lộ trình: gom cả bốn về một nơi (Loki/OpenSearch/Splunk),
 và cho node n8n ghi ra ngoài thay vì chỉ giữ trong execution data. Giữ tối thiểu
 12 tháng nếu thuộc phạm vi SOC 2 hoặc ISO 27001.
+
+**Named Docker volume không phải audit trail compliance-grade**, kể cả sau khi
+thêm `permission.denied` bền ở trên. Không có replication, không tách quyền
+đọc/ghi (ai `docker exec` được vào container `langgraph` đọc/sửa được thẳng file
+NDJSON), không hash-chain chống sửa sau khi ghi, và một lệnh vận hành sai
+(`make nuke`, `docker compose down -v`) xoá sạch không cảnh báo, không thùng
+rác. Coi đây là mức "đủ để dev/staging tự soát", không phải mức nộp cho kiểm
+toán ngoài — cho tới khi việc gom log ở trên được làm.
 
 ---
 

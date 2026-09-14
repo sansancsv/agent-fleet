@@ -365,14 +365,85 @@ Tầng thực thi là một dịch vụ HTTP (`execution-plane/runner/server.mjs
 
 Kiểm nhanh: `docker compose exec agent-runner curl -s localhost:8787/healthz`.
 
+### `git push`/`git clone` từ agent-runner hoặc langgraph báo `Bad credentials` hoặc `Invalid username or token`
+
+Xác thực GitHub qua PAT/HTTPS trong container là loại lỗi **tốn thời gian nhất
+đã gặp** — token đúng, còn hạn, đủ quyền, nhưng vẫn "Bad credentials" không rõ
+nguyên nhân gốc (nghi do rate-limit thứ cấp hoặc phiên PAT bị treo phía
+GitHub, chưa có kết luận chắc chắn). **Đừng debug PAT lâu quá 10 phút** — chuyển
+thẳng sang SSH deploy key, ổn định hơn hẳn trong thực tế:
+
+```bash
+ssh-keygen -t ed25519 -f deploy/docker/secrets/deploy_key_<repo> -N '' \
+  -C 'agent-fleet-<repo>-deploy-key'
+# thêm public key làm Deploy Key trên GitHub (repo → Settings → Deploy keys),
+# PHẢI tick "Allow write access" nếu fleet cần mở PR — mặc định GitHub tạo
+# key read-only, quên tick là open_pr sẽ chết ở bước `git push` với
+# "The key you are authenticating with has been marked as read only."
+make setup-github-ssh
+```
+
+`make setup-github-ssh` cài key + `known_hosts` + `git config
+url."git@github.com:".insteadOf "https://github.com/"` vào **cả**
+`agent-runner` và `langgraph` (agent nào cũng có thể phải `git push`/`clone`).
+Nó ghi vào writable layer của container, không phải volume — **phải chạy lại
+mỗi lần các container đó bị `recreate`** (kể cả chỉ rebuild lại image
+`langgraph` để deploy một bản vá code), nếu không lần `git push` kế tiếp lại
+"Bad credentials" y hệt và dễ tưởng nhầm là PAT hỏng lại.
+
+### LangGraph Studio (`langgraph dev`) không thấy thread nào
+
+Đừng dùng LangGraph Studio để duyệt task của fleet — đã thử và không dùng
+được. `server.py` tự viết đi thẳng vào checkpointer bằng `thread_id` dạng
+chuỗi tuỳ ý (`REQ-XXXX`), bỏ qua hẳn "Threads API" chuẩn của LangGraph
+Platform mà Studio dựa vào. Studio quản lý thread bằng UUID riêng của nó;
+`GET /threads/<task_id>/state` trả thẳng `"Invalid thread ID: must be a
+UUID"`. Hai không gian ID khác nhau, dù trỏ chung một Postgres. Kênh duyệt
+thật là form n8n (`orchestration/n8n/workflows/04-duyet-task.json`, xem
+`docs/05` mục nhịp vận hành) hoặc gọi thẳng `/runs/<id>/resume`.
+
+### Webhook GitHub gọi vào n8n luôn thất bại xác thực, dù đã đúng URL
+
+GitHub repo Webhook (Settings → Webhooks) **không gửi được header tuỳ ý** —
+nó chỉ ký HMAC-SHA256 payload bằng "Secret" rồi gửi qua header cố định
+`X-Hub-Signature-256`. Nếu node webhook trong n8n dùng credential kiểu
+**Header Auth** (khớp đúng tên+giá trị một header tự đặt, ví dụ workflow
+`02-pr-review-gate.json`), một GitHub Webhook gốc **không bao giờ** qua được
+bước xác thực đó — không phải lỗi cấu hình URL/secret, mà là hai cơ chế xác
+thực không tương thích. Cách dùng được: thêm một GitHub Actions workflow
+(`.github/workflows/...yml`) trong **repo mục tiêu** (không phải agent-fleet)
+để forward sự kiện `pull_request` sang n8n kèm đúng header, đọc payload qua
+`$GITHUB_EVENT_PATH` chứ không nội suy `${{ toJSON(github.event) }}` thẳng vào
+lệnh shell (rủi ro injection nếu tiêu đề/mô tả PR chứa ký tự đặc biệt).
+
+Nếu dùng Cloudflare Quick Tunnel (`cloudflared tunnel --url ...`, không tài
+khoản, không named tunnel) để expose n8n cho bước trên: nó **có thể chết bất
+cứ lúc nào** — log báo `Unauthorized: Tunnel not found` từ phía server dù
+tiến trình `cloudflared` vẫn chạy. Đây không phải sự cố mạng cục bộ, không
+sửa được bằng cách chờ; phải `pkill cloudflared` rồi khởi động lại để nhận
+URL `*.trycloudflare.com` **mới**, và phải cập nhật lại secret
+`FLEET_WEBHOOK_URL` phía GitHub Actions. Không phải giải pháp production —
+xem lộ trình.
+
 ### LangGraph trả `403` khi duyệt (`/runs/<id>/resume`)
 
 Trường `by` không nằm trong `approvers` của hồ sơ gắn với thread (`profiles/<tên>.yaml`).
 Đây là chủ đích: token API chứng minh "n8n gọi", không chứng minh "người có
 thẩm quyền đã duyệt". Sửa danh sách `approvers` trong hồ sơ, không nới API.
 Mọi lần duyệt/từ chối (kể cả bị 403) đều ghi một dòng `permission.decision`
-ra log của container `langgraph`. `503` ở mọi endpoint nghĩa là thiếu
+ra log của container `langgraph`, và từ 09/2026 lượt bị 403 còn ghi thêm một
+dòng bền `permission.denied` vào vết chạy (`FLEET_TRAJECTORY_DIR`) — xem
+`docs/04-bao-mat.md` §5. `503` ở mọi endpoint nghĩa là thiếu
 `LANGGRAPH_TOKEN` — API đóng hoàn toàn cho tới khi có token.
+
+Một `409 Thread '<id>' không ở điểm chờ duyệt` **không phải lỗi cấu hình** — nó
+nghĩa là thread đó đã được duyệt/từ chối rồi (hoặc chưa từng tới điểm
+`interrupt()`). Gọi `/resume` hai lần cho cùng một thread luôn là lỗi gọi, không
+phải lỗi hệ thống. Nếu quy trình bị kẹt SAU khi đã duyệt (ví dụ `open_pr` lỗi
+giữa chừng vì mất quyền `git push`), `/resume` không dùng lại được nữa —
+phải chạy tiếp trực tiếp từ checkpoint bằng `graph.ainvoke(None, cfg)` (không
+truyền `Command`), gọi từ trong container `langgraph`; không có endpoint HTTP
+nào cho việc này hôm nay.
 
 ### LangGraph mất trạng thái sau khi khởi động lại
 Kiểm tra `FLEET_CHECKPOINT_DSN` đã trỏ đúng PostgreSQL chưa. Nếu để trống,

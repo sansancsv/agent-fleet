@@ -38,7 +38,7 @@ này (xem §4).
 | **3.1 Serving** | 9/10 | OpenClaw Gateway; `control-plane/config.d/bindings.json` định tuyến kênh → vai trò; allowlist danh tính; phiên dùng chung giữa các kênh | Gateway là một bản sao có trạng thái (SQLite trên PVC) — điểm hỏng đơn. Tài liệu mô tả cùng thiết kế nên không tính là lệch xu thế |
 | **3.2 Orchestration** | 9/10 | Ba tầng xếp chồng n8n → LangGraph → acpx (`docs/02-workflow.md` §3). `fanout()` chạy reviewer + security song song. Đúng pattern **Multi-agent Coordination**: ngữ cảnh được **chia** theo vai trò, không nhân bản | Không có subagent spawning. Đây là lựa chọn có chủ đích cho mô hình chín vai trò cố định, không phải thiếu sót |
 | **3.3 Sandbox** | 6/10 → 7/10 → **5/10** ⬇ | Worktree riêng cho mỗi task (`graph.prepare`); Pod Security `restricted`; `automountServiceAccountToken: false`; gVisor cho agent-runner | **Hạ điểm sau rà soát 07/09.** Tầng K8s yếu hơn tài liệu mô tả: bộ NetworkPolicy chưa từng apply được, credential MCP nằm cùng ảnh với công cụ chạy code, cầu nối không xác thực, khoá model có ở **hai** nơi chứ không phải một. Đã sửa phần cấu hình (ADR-0002) nhưng chưa kiểm chứng trên cụm |
-| **3.4 Context engineering** | 7/10 | **Progressive disclosure ✅** — `distribution-plane/skills/*/SKILL.md` + `fleet-* --help`. **Tool offloading ✅✅** — `capability-plane/generate-clis.sh` sinh CLI thay vì nạp tool schema, mạnh hơn pattern ba-tool trong tài liệu | **Compaction ❌** — chưa có cơ chế nào. Hiện chưa đau vì mỗi nút là một lượt ngắn; sẽ đau khi kéo dài phiên hoặc bật `session` có trạng thái |
+| **3.4 Context engineering** | 7/10 → **6/10** ⬇ | **Progressive disclosure ~** — `distribution-plane/skills/*/SKILL.md` tồn tại và `agents.json` khai `skills: [...]` cho từng vai trò, nhưng đường ống thật (publish lên ClawHub → agent tải về) **chưa từng chạy**: không có binary `clawhub` trên máy nào đã kiểm, không có dịch vụ ClawHub trong `docker-compose.yml`, và `run-role.sh`/code Python không chỗ nào đọc `SKILL.md`. Đây là cấu hình khai báo ý định, không phải cơ chế đã kiểm chứng — hạ từ ✅ xuống ~ sau khi xác minh trực tiếp (09/2026). **Tool offloading ✅✅** — `capability-plane/generate-clis.sh` sinh CLI thay vì nạp tool schema, mạnh hơn pattern ba-tool trong tài liệu | **Compaction ❌** — chưa có cơ chế nào. Hiện chưa đau vì mỗi nút là một lượt ngắn; sẽ đau khi kéo dài phiên hoặc bật `session` có trạng thái. **ClawHub end-to-end ❌** — xem cột bên trái, đây là khoảng lệch thật, không phải rủi ro giả định |
 | **3.5 Memory** | 4/10 → **7/10** | Trước đợt này: chỉ có checkpoint PostgreSQL (state của quy trình) và phiên gateway. Sau đợt này: `orchestration/langgraph/src/fleet/memory.py` — `MEMORY.md` làm mục lục, `repos/<slug>.md` tích luỹ bài học, `tasks/<id>.md` ghi tiến độ | Vẫn chưa có cơ chế loại bỏ bài học đã lỗi thời ngoài việc cắt theo số lượng. Ngưỡng "Markdown không còn đủ" chưa quan sát được |
 | **3.6 Tools** | 10/10 | `default-deny`; MCP thay vì bash trần; quy tắc chặn ở ≥2 tầng (`policy/tool-policy.yaml`); `globalDeny`; OPA rego có test; `validate.sh` bước 6 kiểm khớp vai trò | — |
 | **3.7 Agent loop** | 10/10 | Orchestrator-Worker với bộ kiểm chứng tách rời thực thi. `gate()` là hàm thuần tuý có test. Mọi vòng lặp có trần (`max_revisions`, `limits.maxStepRuns`) | — |
@@ -169,3 +169,31 @@ có: `validate.sh` bước 8d.
 Việc số 1 phụ thuộc một câu hỏi kỹ thuật chưa ai trả lời: **acpx có đọc được
 base URL cho cả ba backend từ biến môi trường không?** Chạy `./scripts/preflight.sh`
 và trả lời câu đó trước, đừng đoán.
+
+---
+
+## 7. Ghi nhận 14/09/2026 — lần đầu chạy hết một vòng thật trên repo ngoài
+
+Không phải một lần chấm lại đầy đủ (không đổi điểm ngoài dòng 3.4 ở trên), chỉ
+ghi nhận: đây là lần đầu tiên fleet chạy **webhook → LangGraph → worktree →
+implementer → reviewer → gate → interrupt() → người duyệt → open_pr** trọn vẹn
+trên một repo GitHub thật ngoài agent-fleet (`sansancsv/cobrain`), hai lần, cả
+hai đều merge thành công. Điều này xác nhận thật (không chỉ đọc mã) hai dòng
+trong bảng chấm §2: 3.7 Agent loop và phần "Durability" của 3.8.
+
+Đồng thời lộ ra ba thứ **chưa hiện trong bảng chấm** vì không thuộc lớp harness
+nào ở trên nhưng ảnh hưởng trực tiếp tới việc vận hành thật:
+
+- Hai bug logic có sẵn trong `orchestration/n8n/workflows/02-pr-review-gate.json`
+  (không phải mới tạo ra) khiến nhánh review 3-model **chưa từng chạy thật** dù
+  workflow trông như đã publish — `responseMode` trỏ node không tồn tại, và
+  điều kiện lọc `contains` bị đảo ngược nên luôn `false`. Bài học: publish được
+  và không báo lỗi không có nghĩa là nhánh đó từng được thực thi; cần một lượt
+  test thật (không phải "Execute step" với dữ liệu giả) trước khi coi một
+  workflow n8n là "đã xong".
+- Mục 3.4 ở trên (ClawHub) là ví dụ cùng loại bài học ở tầng phân phối.
+- Audit trail (§3.8) có một lỗ hổng hẹp đã vá một phần: xem `docs/04-bao-mat.md`
+  §5 (`permission.denied`) — nhưng cảnh báo compliance-grade ở đó vẫn đứng.
+
+Xem `docs/05-runbook.md` (mục sự cố GitHub auth, LangGraph Studio, webhook
+GitHub) để có chi tiết vận hành đầy đủ của các sự cố thật gặp trong đợt này.
