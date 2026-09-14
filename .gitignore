@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+/deploy/docker/secrets/
 node_modules/
 __pycache__/
 *.pyc

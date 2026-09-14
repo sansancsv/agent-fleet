@@ -126,6 +126,19 @@ def approval(task_id: str, *, by: str, approved: bool, profile: str = "") -> Non
              "by": by, "approved": approved, "profile": profile})
 
 
+def permission_denied(task_id: str, *, profile: str, by: str, reason: str) -> None:
+    """Một lượt gọi /runs/<id>/resume bị chặn TRƯỚC KHI chạm graph.
+
+    `human_approval` trong graph.py chỉ chạy sau khi server.py đã cho `by` qua
+    kiểm `in approvers` — nên một yêu cầu bị 403 không bao giờ tới đó và không
+    để lại dấu vết bền nào nếu không gọi hàm này. Đây là nhánh audit DUY NHẤT
+    cho các lượt bị từ chối vì sai người, tách khỏi `approval()` (vốn chỉ ghi
+    quyết định của một approver hợp lệ, dù approved=True hay False).
+    """
+    _append({"ts": _now(), "event": "permission.denied", "task_id": task_id,
+             "profile": profile, "by": by, "reason": reason})
+
+
 # ---------------------------------------------------------------------------
 # ĐỌC — dùng bởi fleet.metrics
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
   "//": "Khai báo cho LangGraph CLI: langgraph dev / langgraph build / langgraph up",
   "dependencies": ["."],
   "graphs": {
-    "fleet": "./src/fleet/graph.py:graph"
+    "fleet": "fleet.graph:graph"
   },
   "env": ".env",
   "python_version": "3.12",

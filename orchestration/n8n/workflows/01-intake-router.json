@@ -9,6 +9,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "fleet/intake",
+        "responseMode": "responseNode",
         "authentication": "headerAuth",
         "options": { "rawBody": false }
       },
@@ -23,7 +24,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// CHỐT 1 — Chuẩn hoá và làm sạch đầu vào.\n// Mọi thứ đến từ bên ngoài đều là DỮ LIỆU KHÔNG TIN CẬY.\n// Ta không bao giờ ghép thẳng vào prompt mà không bọc thẻ <untrusted>,\n// và KHÔNG BAO GIỜ ghép vào lệnh shell — workflow này không có node nào chạy shell.\nconst body = $input.first().json.body ?? $input.first().json;\n\nconst clean = (s, max) => String(s ?? '')\n  .replace(/\\u0000/g, '')\n  .slice(0, max);\n\nreturn [{\n  json: {\n    requestId: `REQ-${Date.now().toString(36).toUpperCase()}`,\n    profile:   clean(body.profile, 40)   || 'engineering',\n    requester: clean(body.requester, 80),\n    request:   clean(body.request, 8000),\n    repo:      clean(body.repo, 200),\n    priority:  ['low','normal','high','urgent'].includes(body.priority) ? body.priority : 'normal',\n    receivedAt: new Date().toISOString(),\n  }\n}];"
+        "jsCode": "// CHỐT 1 — Chuẩn hoá và làm sạch đầu vào.\n// Mọi thứ đến từ bên ngoài đều là DỮ LIỆU KHÔNG TIN CẬY.\n// Ta không bao giờ ghép thẳng vào prompt mà không bọc thẻ <untrusted>,\n// và KHÔNG BAO GIỜ ghép vào lệnh shell — workflow này không có node nào chạy shell.\nconst body = $input.first().json.body ?? $input.first().json;\n\nconst clean = (s, max) => String(s ?? '')\n  .replace(/\\u0000/g, '')\n  .slice(0, max);\n\nconst profile = clean(body.profile, 40) || 'engineering';\nconst request = clean(body.request, 8000);\n\n// Quyết định định tuyến làm ở ĐÂY, bằng JS thuần — không phải trong tham số\n// của node Switch. Lý do: node đồ hoạ có schema đổi theo từng phiên bản công\n// cụ (typeVersion) và việc so sánh kiểu do đó không ổn định giữa các bản n8n;\n// một hàm JS trả về đúng MỘT chuỗi thì luôn so sánh bằng '===' được, ở bất kỳ\n// phiên bản n8n nào. Node Switch phía sau chỉ đọc `category`, không tự quyết.\nconst URGENT_RE = /(deploy|rollback|sự cố|incident|production down)/i;\nconst category = URGENT_RE.test(request) ? 'van-hanh'\n  : profile === 'engineering' ? 'ky-thuat'\n  : 'phong-ban-khac';\n\nreturn [{\n  json: {\n    requestId: `REQ-${Date.now().toString(36).toUpperCase()}`,\n    profile,\n    requester: clean(body.requester, 80),\n    request,\n    repo:      clean(body.repo, 200),\n    priority:  ['low','normal','high','urgent'].includes(body.priority) ? body.priority : 'normal',\n    receivedAt: new Date().toISOString(),\n    category,\n  }\n}];"
       },
       "id": "n-normalize",
       "name": "Chuẩn hoá đầu vào",
@@ -75,9 +76,9 @@
               "conditions": {
                 "options": { "version": 2 },
                 "conditions": [{
-                  "leftValue": "={{ $('Chuẩn hoá đầu vào').item.json.request }}",
-                  "rightValue": "(?i)(deploy|rollback|sự cố|incident|production down)",
-                  "operator": { "type": "string", "operation": "regex" }
+                  "leftValue": "={{ $('Chuẩn hoá đầu vào').item.json.category }}",
+                  "rightValue": "van-hanh",
+                  "operator": { "type": "string", "operation": "equals" }
                 }],
                 "combinator": "and"
               },
@@ -88,8 +89,8 @@
               "conditions": {
                 "options": { "version": 2 },
                 "conditions": [{
-                  "leftValue": "={{ $('Chuẩn hoá đầu vào').item.json.profile }}",
-                  "rightValue": "engineering",
+                  "leftValue": "={{ $('Chuẩn hoá đầu vào').item.json.category }}",
+                  "rightValue": "ky-thuat",
                   "operator": { "type": "string", "operation": "equals" }
                 }],
                 "combinator": "and"

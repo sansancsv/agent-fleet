@@ -284,7 +284,7 @@ services:
   # TẦNG ĐIỀU PHỐI — n8n ở queue mode (bắt buộc cho môi trường thật)
   # ---------------------------------------------------------------------------
   n8n:
-    image: n8nio/n8n:${N8N_TAG:-latest}
+    image: n8nio/n8n:${N8N_TAG:-2.36.9}
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
@@ -309,6 +309,9 @@ services:
       EXECUTIONS_DATA_MAX_AGE: "336"
       GENERIC_TIMEZONE: Asia/Ho_Chi_Minh
       N8N_DIAGNOSTICS_ENABLED: "false"
+      # n8n bản mới mặc định chặn $env.* trong expression node (bảo mật) — các
+      # workflow của fleet đọc LANGGRAPH_URL/TOKEN qua $env nên cần mở lại.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
       OPENCLAW_GATEWAY_URL: http://openclaw-gateway:18789
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
       LANGGRAPH_URL: http://langgraph:8000
@@ -334,7 +337,7 @@ services:
     logging: *logging
 
   n8n-worker:
-    image: n8nio/n8n:${N8N_TAG:-latest}
+    image: n8nio/n8n:${N8N_TAG:-2.36.9}
     restart: unless-stopped
     command: ["worker", "--concurrency=5"]
     depends_on:

@@ -9,6 +9,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "fleet/github-pr",
+        "responseMode": "onReceived",
         "authentication": "headerAuth",
         "options": {}
       },
@@ -24,8 +25,8 @@
           "options": { "version": 2 },
           "conditions": [
             {
-              "leftValue": "={{ $json.body.action }}",
-              "rightValue": "opened,synchronize,ready_for_review",
+              "leftValue": "opened,synchronize,ready_for_review",
+              "rightValue": "={{ $json.body.action }}",
               "operator": { "type": "string", "operation": "contains" }
             },
             {

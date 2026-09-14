@@ -116,6 +116,21 @@ def _after_turn(
 # ---------------------------------------------------------------------------
 # NÚT 1 — Chuẩn bị. Xác định thuần tuý, không có model tham gia.
 # ---------------------------------------------------------------------------
+def _default_base_ref(repo: str) -> str:
+    """Nhánh mặc định thật của remote (origin/main, origin/master...).
+
+    Không đoán cứng "main" — nhiều repo có từ trước (kể cả repo mới nhưng đã
+    đổi tên nhánh) vẫn dùng "master". `git clone` luôn đặt origin/HEAD trỏ
+    đúng nhánh mặc định lúc clone; symbolic-ref đọc lại chính xác cái đó.
+    Cùng cách làm với `execution-plane/scripts/fanout-review.sh`.
+    """
+    result = subprocess.run(
+        ["git", "-C", repo, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"],
+        capture_output=True, text=True,
+    )
+    return result.stdout.strip() or "origin/main"
+
+
 async def prepare(state: FleetState) -> dict:
     task_id = state["task_id"].lower()
     repo = state["repo"]
@@ -123,8 +138,9 @@ async def prepare(state: FleetState) -> dict:
     worktree = f"{REPO_ROOT}/wt-{task_id}"
 
     subprocess.run(["git", "-C", repo, "fetch", "--prune", "origin"], check=True)
+    base_ref = _default_base_ref(repo)
     subprocess.run(
-        ["git", "-C", repo, "worktree", "add", "-B", branch, worktree, "origin/main"],
+        ["git", "-C", repo, "worktree", "add", "-B", branch, worktree, base_ref],
         check=True,
     )
     # Giao lại quyền sở hữu cho user thật sự sẽ ghi — cả worktree lẫn repo gốc

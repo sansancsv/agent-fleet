@@ -55,6 +55,12 @@
     "./config.d/cron.json",
   ],
 
+  // --- Plugin: `openclaw plugins install/enable` cần khối này nằm ở FILE GỐC,
+  // không được nằm trong file $include — CLI từ chối ghi trạng thái nếu không.
+  plugins: {
+    entries: {},
+  },
+
   // --- Biến môi trường -------------------------------------------------------
   // CỐ Ý KHÔNG khai báo `env.vars`.
   //   `env.vars` ghi thẳng giá trị ra biến môi trường của tiến trình. Vì cấu hình

@@ -123,3 +123,8 @@ demo-flow:  ## Chạy thử flow giao hàng tính năng
 .PHONY: demo-review
 demo-review:  ## Chạy thử thẩm định chéo ba model
 	$(COMPOSE) exec -T agent-runner /fleet/execution-plane/scripts/fanout-review.sh /srv/repos/demo
+
+.PHONY: setup-github-ssh
+setup-github-ssh:  ## Cài deploy key SSH vào agent-runner (chạy lại sau mỗi lần agent-runner bị recreate)
+	bash deploy/docker/secrets/setup_deploy_key.sh
+	bash deploy/docker/secrets/setup_git_ssh.sh

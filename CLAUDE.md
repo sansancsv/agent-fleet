@@ -115,6 +115,10 @@ Ba module nhỏ trong `orchestration/langgraph/src/fleet/`, tất cả chỉ do 
 | `trajectory.py` | `FLEET_TRAJECTORY_DIR`, NDJSON một file một ngày | "quy trình hỏng ở nút nào, lỗi nào lặp lại" |
 | `metrics.py` | không ghi — đọc vết chạy | bốn chỉ số ở mục 3.8 của `tien-hoa-agentic-patterns-vi.md`; `GET /metrics`, `python -m fleet.metrics` |
 
+**Không có UI duyệt người thật cho `POST /runs/<id>/resume`.** `server.py` tự viết, đi thẳng vào checkpointer bằng `thread_id` dạng chuỗi tuỳ ý (ví dụ `REQ-XXXX`), bỏ qua hẳn "Threads API" chuẩn của LangGraph Platform. Hệ quả: **LangGraph Studio/`langgraph dev` không dùng để duyệt các task này được** — Studio quản lý thread bằng UUID riêng của nó (`GET /threads/<id>/state` đòi UUID, trả "Invalid thread ID" cho `task_id` dạng chuỗi), sống trong không gian ID khác hoàn toàn, dù trỏ chung một Postgres. Đã thử nối `langgraph dev` vào đúng `FLEET_CHECKPOINT_DSN` — graph load được (sau khi sửa `langgraph.json` dùng đường dẫn module `fleet.graph:graph` thay vì đường dẫn file, xem bên dưới), nhưng không thấy được thread đã tồn tại. Người duyệt hôm nay chỉ có một cách: gọi thẳng `POST /runs/<id>/resume` (qua n8n có xác thực người bấm thật — ví dụ nút Slack — hoặc gọi tay nếu chính người quyết định hiểu rõ mình đang chạy gì). Việc còn treo: dựng kênh duyệt thật (Slack qua n8n, hoặc một trang duyệt tối giản gọi thẳng API này).
+
+`langgraph.json` có bug: khai `"fleet": "./src/fleet/graph.py:graph"` (đường dẫn FILE) làm `langgraph dev` nạp module bằng `importlib.util.spec_from_file_location`, không thiết lập package context, nên `from . import memory, trajectory` trong `graph.py` vỡ với "attempted relative import with no known parent package". Sửa bằng đường dẫn MODULE đã cài (`"fleet.graph:graph"`) — chạy đúng, vì gói đã `pip install -e .`.
+
 Phân biệt phải giữ: **checkpointer là state của một luồng; memory là tri thức giữa các luồng.** Đừng nhét bài học vào `FleetState` và đừng dùng checkpointer làm bộ nhớ.
 
 Chi phí token trong `metrics.py` cố ý trả `None` kèm lý do, không quy đổi từ số ký tự. Khi acpx phơi số token thì sửa `trajectory.step()` để ghi thêm.
@@ -137,6 +141,7 @@ Phần lớn được `scripts/validate.sh` và `scripts/check-oc-placeholders.p
 - Không khai `env.vars` (ghi đè khoá API do Docker tiêm vào).
 - `gateway.bind` là enum (`lan` cho Docker), không phải IP; không đọc từ biến môi trường.
 - `agents.ownership: "explicit"` bắt buộc; không dùng `default: true` (đã khai tử); agent mặc định = luật bắt-tất-cả cuối trong `bindings.json`. Trong cùng tầng, luật đứng trước thắng — xếp từ hẹp tới rộng.
+- `openclaw plugins install`/`enable` **từ chối ghi cấu hình** với thông báo "Config plugins are stored through an unsupported $include shape at the root" bất cứ khi nào `control-plane/openclaw.json` (file gốc) dùng `$include` — dù khối `plugins` được đặt trực tiếp ở file gốc, không qua include (đã thử, vẫn lỗi y hệt sau khi recreate gateway). Đây là giới hạn của CLI, không phải lỗi cấu hình — chưa tìm được cách hợp lệ để cài plugin qua CLI (kể cả `@openclaw/slack`) mà không rời bỏ kiến trúc `$include` của repo này. Hướng chưa thử: tự tải gói và trỏ qua `plugins.load.paths` (bỏ qua bước "install" của CLI). Cho tới khi có cách khác, dùng n8n làm kênh vào chính; hoãn Slack.
 - Tra schema thật: `openclaw config schema | jq '.properties.<khối>.properties | keys'`. **Không chạy `openclaw doctor --fix`** trên cấu hình trong git.
 - Image ghim `OPENCLAW_TAG` trong `.env`; CLI trên host khác bản sẽ cho kết quả validate không đại diện — vì vậy luôn dùng `make oc-validate`.
 

@@ -1,0 +1,70 @@
+{
+  "name": "Fleet · Duyệt task chờ phê duyệt",
+  "meta": {
+    "description": "Trang web thật cho người duyệt — thay cho việc gọi tay POST /runs/<id>/resume. Người duyệt điền form, không cần biết curl/JSON là gì. `by` lấy từ email họ tự nhập; server.py vẫn là nơi kiểm `by` có nằm trong approvers của hồ sơ hay không (xem docs/06 và CLAUDE.md mục 'Không có UI duyệt người thật')."
+  },
+  "settings": { "executionOrder": "v1" },
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Duyệt task Fleet",
+        "formDescription": "Nhập mã task và email của bạn. Trước khi duyệt, hãy tự kiểm tra chi tiết task (diff, rủi ro) qua kênh nội bộ — form này chỉ ghi lại quyết định, chưa hiện được nội dung diff.",
+        "formFields": {
+          "values": [
+            { "fieldLabel": "Mã task (Task ID)" },
+            { "fieldLabel": "Email người duyệt" },
+            { "fieldLabel": "Quyết định (gõ đúng: Duyệt hoặc Từ chối)" },
+            { "fieldLabel": "Ghi chú (không bắt buộc)", "requiredField": false }
+          ]
+        },
+        "options": {}
+      },
+      "id": "n-trigger",
+      "name": "Nhận form duyệt",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [-140, 300],
+      "webhookId": "fleet-duyet-task"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LANGGRAPH_URL }}/runs/{{ $json['Mã task (Task ID)'] }}/resume",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.LANGGRAPH_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ approved: ($json['Quyết định (gõ đúng: Duyệt hoặc Từ chối)'] || '').trim().toLowerCase() === 'duyệt', by: $json['Email người duyệt'], note: $json['Ghi chú (không bắt buộc)'] || '' }) }}",
+        "options": { "response": { "response": { "neverError": true } } }
+      },
+      "id": "n-resume",
+      "name": "Gửi quyết định",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [80, 300],
+      "notes": "Gọi POST /runs/<id>/resume — server.py tự kiểm `by` có trong approvers của hồ sơ gắn với thread hay không, trả 403 nếu không (xem docs/05-runbook.md)."
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "Đã ghi nhận quyết định",
+        "completionMessage": "Fleet sẽ tiếp tục xử lý theo quyết định của bạn. Nếu bị từ chối (lỗi 403), email bạn nhập chưa nằm trong danh sách approvers của hồ sơ — báo quản trị viên.",
+        "options": {}
+      },
+      "id": "n-end",
+      "name": "Xác nhận",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [300, 300]
+    }
+  ],
+  "connections": {
+    "Nhận form duyệt": { "main": [[{ "node": "Gửi quyết định", "type": "main", "index": 0 }]] },
+    "Gửi quyết định": { "main": [[{ "node": "Xác nhận", "type": "main", "index": 0 }]] }
+  }
+}

@@ -41,6 +41,7 @@ import yaml
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from . import trajectory
 from .graph import build_graph
 from .state import blockers, initial_state
 
@@ -249,6 +250,14 @@ async def run_resume(thread_id: str, decision: ResumeRequest) -> dict:
         _audit("permission.decision", thread_id=thread_id, profile=profile_name,
                by=decision.by, approved=decision.approved, allowed=False,
                reason="not-an-approver")
+        # Nhánh 403 dừng TRƯỚC KHI chạm graph nên human_approval() trong graph.py
+        # không bao giờ chạy cho lượt này — không có dòng này thì một yêu cầu bị
+        # từ chối vì sai người không để lại dấu vết bền nào (chỉ có dòng
+        # permission.decision ephemeral trên stdout ở trên). Ghi vào trajectory
+        # (fail-soft, xem trajectory._append) để bền qua restart/redeploy như
+        # mọi quyết định hợp lệ khác.
+        trajectory.permission_denied(thread_id, profile=profile_name,
+                                      by=decision.by, reason="not-an-approver")
         raise HTTPException(
             403,
             f"'{decision.by or '(trống)'}' không nằm trong danh sách người duyệt "
