@@ -160,6 +160,11 @@ Chi tiết: `docs/03-mo-rong-phong-ban.md`.
 Node 24+ · Python 3.12+ · Docker Engine + Compose v2 · git · jq · yq
 (tuỳ chọn: `gh`, `opa`, `kubectl` cho triển khai Kubernetes)
 
+**Trên Windows, mọi lệnh ở trên chạy bên trong WSL, không chạy trên PowerShell/cmd.**
+`make` cần `bash` (`Makefile` khai `SHELL := /bin/bash`) và `bootstrap.sh` là script
+bash thuần — cả hai không chạy được trên Windows host. Mở một cửa sổ WSL trước
+(`wsl -d Ubuntu`), rồi làm theo mục dưới đây trước khi chạy bất kỳ lệnh nào ở trên.
+
 ### Dùng WSL trên Windows
 
 Đặt repo trên **filesystem Linux** (`~/agent-fleet`), không phải trên ổ Windows
