@@ -87,6 +87,7 @@ Tầng thực thi là dịch vụ HTTP, không phải container để `docker ex
 - **Khoá model được thu hẹp theo backend** ở `run-role.sh` và `acpx_client.provider_env()`; hai nơi phải khớp, `validate.sh` bước 5d kiểm — mỗi backend chỉ thấy đúng khoá API của mình, giảm bán kính rò rỉ khoá.
 - **Dữ liệu ngoài bọc trong `<untrusted source="...">`** khi đưa vào prompt.
 - **Một quyền bị chặn ở ít nhất hai tầng**: OpenClaw `tools.deny`, cờ acpx (`--deny-all`/`--approve-reads`/`--approve-all`), mcporter `allowedTools`, OPA rego, K8s RBAC.
+- **Không chặn event loop.** `server.py` chạy mọi run trên MỘT event loop; một `subprocess.run` (git fetch/push mất vài phút) trong nút `async` treo cả server — run khác, `/ok`, `/runs/{id}`. Lệnh ngoài trong `graph.py` đi qua `_run` (asyncio subprocess, argv, `check` mặc định bật, trần `SUBPROCESS_TIMEOUT_S`); endpoint có I/O đĩa khai `def` để FastAPI đẩy sang threadpool. Ruff `ASYNC` (bật trong `pyproject.toml`) chỉ bắt lời gọi *trực tiếp* trong hàm async — helper đồng bộ gọi từ nút async (như `_default_base_ref` trước đây) vẫn lọt, phải tự soát.
 
 ### Vai trò được khai báo ở nhiều nơi, phải sửa đồng bộ
 

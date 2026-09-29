@@ -60,6 +60,61 @@ REPO_ROOT = os.environ.get("FLEET_REPO_ROOT", "/srv/repos")
 WORKTREE_OWNER_UID = int(os.environ.get("FLEET_WORKTREE_UID", "1000"))
 WORKTREE_OWNER_GID = int(os.environ.get("FLEET_WORKTREE_GID", "1000"))
 
+# Trần thời gian cho MỘT lệnh ngoài (git fetch/push, chown -R, gh pr create).
+# Rộng rãi có chủ đích: fetch/push repo lớn mất vài phút là bình thường. Trần
+# này không đo hiệu năng, nó chặn "treo vô hạn" — một `git fetch` kẹt mạng phải
+# làm run đó hỏng có lý do, không được nằm chờ mãi.
+SUBPROCESS_TIMEOUT_S = 600
+
+
+# ---------------------------------------------------------------------------
+# LỆNH NGOÀI — mọi git/gh/chown của đồ thị đi qua đây, không qua subprocess.run
+# ---------------------------------------------------------------------------
+async def _run(
+    argv: list[str],
+    *,
+    cwd: str | None = None,
+    capture: bool = False,
+    check: bool = True,
+    timeout_s: float = SUBPROCESS_TIMEOUT_S,
+) -> subprocess.CompletedProcess[str]:
+    """`subprocess.run` bản async cho các nút `async` của đồ thị.
+
+    Vì sao cần: server.py phục vụ MỌI run trên một event loop. Một lời gọi đồng
+    bộ (git fetch/push có thể mất vài phút) làm treo cả server theo — các run
+    khác, `/ok`, `/runs/{id}` đều không phản hồi, healthcheck coi container chết.
+
+    Vì sao không `asyncio.to_thread(subprocess.run, ...)`: executor mặc định đó
+    cũng là nơi `run_role` giữ một thread suốt cả lượt agent (gọi agent-runner),
+    nên lệnh git sẽ xếp hàng sau các lượt dài. Tiến trình con asyncio không cần
+    thread nào.
+
+    Giữ đúng ngữ nghĩa `subprocess.run` mà các nút dựa vào:
+      * argv đưa thẳng cho exec, không qua shell (như `acpx_client.run_role`);
+      * mã thoát khác 0 → `CalledProcessError`. `check` mặc định BẬT, ngược với
+        subprocess.run, có chủ đích: quên `check` thì lỗi nổ ra chứ không bị nuốt;
+      * `capture=True` ≈ `capture_output=True, text=True`; không capture thì
+        stdout/stderr đi thẳng ra log của container như trước;
+      * hết giờ → giết tiến trình con rồi ném `TimeoutExpired`. Bị huỷ giữa chừng
+        cũng giết: một `git push` mồ côi vẫn đẩy được nhánh sau khi run đã dừng.
+    """
+    pipe = asyncio.subprocess.PIPE if capture else None
+    proc = await asyncio.create_subprocess_exec(*argv, cwd=cwd, stdout=pipe, stderr=pipe)
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        raise subprocess.TimeoutExpired(argv, timeout_s) from None
+    finally:
+        if proc.returncode is None:  # hết giờ hoặc bị huỷ: tiến trình con vẫn đang chạy
+            proc.kill()
+            await proc.wait()
+
+    stdout = out.decode("utf-8", "replace") if out is not None else None
+    stderr = err.decode("utf-8", "replace") if err is not None else None
+    if check and proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, argv, stdout, stderr)
+    return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+
 
 # ---------------------------------------------------------------------------
 # BỘ NHỚ VÀ VẾT CHẠY — hai móc dùng chung cho mọi nút có gọi model
@@ -116,17 +171,20 @@ def _after_turn(
 # ---------------------------------------------------------------------------
 # NÚT 1 — Chuẩn bị. Xác định thuần tuý, không có model tham gia.
 # ---------------------------------------------------------------------------
-def _default_base_ref(repo: str) -> str:
+async def _default_base_ref(repo: str) -> str:
     """Nhánh mặc định thật của remote (origin/main, origin/master...).
 
     Không đoán cứng "main" — nhiều repo có từ trước (kể cả repo mới nhưng đã
     đổi tên nhánh) vẫn dùng "master". `git clone` luôn đặt origin/HEAD trỏ
     đúng nhánh mặc định lúc clone; symbolic-ref đọc lại chính xác cái đó.
     Cùng cách làm với `execution-plane/scripts/fanout-review.sh`.
+
+    `check=False` có chủ đích: repo không có origin/HEAD (init tay, remote
+    chưa đặt HEAD) thì lùi về origin/main, không làm hỏng cả run.
     """
-    result = subprocess.run(
+    result = await _run(
         ["git", "-C", repo, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"],
-        capture_output=True, text=True,
+        capture=True, check=False,
     )
     return result.stdout.strip() or "origin/main"
 
@@ -137,17 +195,14 @@ async def prepare(state: FleetState) -> dict:
     branch = f"feat/{task_id}"
     worktree = f"{REPO_ROOT}/wt-{task_id}"
 
-    subprocess.run(["git", "-C", repo, "fetch", "--prune", "origin"], check=True)
-    base_ref = _default_base_ref(repo)
-    subprocess.run(
-        ["git", "-C", repo, "worktree", "add", "-B", branch, worktree, base_ref],
-        check=True,
-    )
+    await _run(["git", "-C", repo, "fetch", "--prune", "origin"])
+    base_ref = await _default_base_ref(repo)
+    await _run(["git", "-C", repo, "worktree", "add", "-B", branch, worktree, base_ref])
     # Giao lại quyền sở hữu cho user thật sự sẽ ghi — cả worktree lẫn repo gốc
     # (fetch + worktree add rải file root-owned khắp .git, xem chú thích trên).
     owner = f"{WORKTREE_OWNER_UID}:{WORKTREE_OWNER_GID}"
-    subprocess.run(["chown", "-R", owner, repo], check=True)
-    subprocess.run(["chown", "-R", owner, worktree], check=True)
+    await _run(["chown", "-R", owner, repo])
+    await _run(["chown", "-R", owner, worktree])
 
     # Mở file tiến độ và ghi mốc bắt đầu. Tương ứng "initializer agent" trong
     # pattern long-running agent của Anthropic, nhưng làm bằng code — không tốn
@@ -317,12 +372,12 @@ def human_approval(state: FleetState) -> Command:
 # ---------------------------------------------------------------------------
 async def open_pr(state: FleetState) -> dict:
     wt, branch = state["worktree"], state["branch"]
-    subprocess.run(["git", "-C", wt, "push", "-u", "origin", branch], check=True)
-    out = subprocess.run(
+    await _run(["git", "-C", wt, "push", "-u", "origin", branch])
+    out = await _run(
         ["gh", "pr", "create", "--head", branch, "--draft",
          "--title", f"{state['task_id']}: {state['title']}",
          "--body", _pr_body(state)],
-        cwd=wt, capture_output=True, text=True, check=True,
+        cwd=wt, capture=True,
     )
     return {"pr_url": out.stdout.strip(), "outcome": "success"}
 

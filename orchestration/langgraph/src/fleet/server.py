@@ -112,9 +112,14 @@ app = FastAPI(title="Fleet Orchestrator", version="1.0.0", lifespan=lifespan)
 # ---------------------------------------------------------------------------
 # Sức khoẻ — endpoint DUY NHẤT không cần token (healthcheck của compose/K8s).
 # Không lộ gì ngoài trạng thái checkpointer và tên hồ sơ.
+#
+# `def` chứ không `async def` (ở đây và ở /profiles): glob/is_dir là I/O đĩa
+# đồng bộ. FastAPI chạy hàm `def` trên threadpool của anyio, nên không chặn event
+# loop mà mọi run dùng chung, và cũng không xếp hàng sau các lượt agent dài đang
+# giữ executor mặc định của asyncio (xem `acpx_client.run_role`).
 # ---------------------------------------------------------------------------
 @app.get("/ok")
-async def ok() -> dict:
+def ok() -> dict:
     return {
         "ok": True,
         "checkpointer": "postgres" if CHECKPOINT_DSN else "memory",
@@ -137,7 +142,7 @@ def _load_profile(name: str) -> dict:
 
 
 @app.get("/profiles", dependencies=[Protected])
-async def list_profiles() -> dict:
+def list_profiles() -> dict:
     if not PROFILES_DIR.is_dir():
         return {"profiles": []}
     return {"profiles": sorted(p.stem for p in PROFILES_DIR.glob("*.yaml") if p.stem != "_schema")}
