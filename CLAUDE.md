@@ -151,12 +151,6 @@ Phần lớn được `scripts/validate.sh` và `scripts/check-oc-placeholders.p
 - Không đặt khoá chú thích `"//..."` bên trong `mcpServers` (cấp gốc thì được).
 - `mcporter serve` không có auth; cách ly ở tầng mạng (không map port ra host, NetworkPolicy ở K8s).
 
-**n8n (`orchestration/n8n/workflows/`, đối chiếu n8n 2.36.9)**:
-- Node Merge v3 kiểu `combine`/`combineAll` gộp item của đầu vào 1 và 2 thành **một** (trường trùng tên: đầu vào sau đè) và bỏ qua mọi đầu vào từ thứ 3. Muốn chờ đủ N nhánh rồi xử lý từng kết quả thì dùng `mode: append` với `numberInputs` đặt **trong** `parameters` (đặt ở cấp node thì bị bỏ qua).
-- Node httpRequest không có `onError` thì một phản hồi non-2xx dừng cả workflow: không nhận xét, không trạng thái commit, không dọn dẹp. Với `onError: continueRegularOutput`, item lỗi có dạng `{ error: { message, status } }` và **không** mang `role` của payload, nên node hợp nhất đọc kết quả theo tên node (`$('<tên node>').all()`), không theo thứ tự item. Riêng 429, n8n thay `message` bằng lời khuyên của chính nó; mã HTTP nằm ở `error.status`.
-- **Không hoàn tất ≠ sạch.** `02-pr-review-gate.json` chỉ báo `success` khi mọi lượt thẩm định trả HTTP 200, `exit` = 0, có khối `fleet-status` và `outcome` là `success`/`partial` (cùng định nghĩa với `policies.turn_problem` của LangGraph); lượt nào không đạt thì `error` (hoặc `failure` nếu đã có mục chặn). Đổi tên node thẩm định thì sửa cả bảng `REVIEWS` trong node hợp nhất; bước 5e của `validate.sh` bắt chỗ lệch.
-- `description` của commit status trên GitHub tối đa 140 ký tự (dài hơn → 422); node hợp nhất cắt sẵn.
-
 **Docker (`deploy/docker/`)**: named volume gắn vào thư mục con của image ngoài phải có init container chown trước (`check-volume-perms.py`); image tự build thì tạo sẵn thư mục trong Dockerfile. State của OpenClaw nằm ở `/home/node/.openclaw/state`, không phải `~/.config/openclaw`.
 
 **Kubernetes (`deploy/k8s/`)**:
@@ -166,6 +160,12 @@ Phần lớn được `scripts/validate.sh` và `scripts/check-oc-placeholders.p
 - `mcporter serve` **không có endpoint HTTP nào**; probe phải dùng `tcpSocket`. `httpGet /healthz` làm Deployment không bao giờ Ready mà log vẫn sạch.
 - Ảnh `mcporter` tách riêng khỏi `agent-runner` (`Dockerfile.mcporter`): pod giữ credential MCP không được chứa sẵn acpx/gh/git/run-role.sh — lộ credential MCP không đồng nghĩa lộ quyền chạy code.
 - Namespace có hai đường ra Internet (mcporter + gateway cho Slack Socket Mode), cộng một rule 443 tạm thời cho agent-runner cho tới khi có `llm-egress-gateway`.
+
+**n8n (`orchestration/n8n/workflows/`, đối chiếu n8n 2.36.9)**:
+- Node Merge v3 kiểu `combine`/`combineAll` gộp item của đầu vào 1 và 2 thành **một** (trường trùng tên: đầu vào sau đè) và bỏ qua mọi đầu vào từ thứ 3. Muốn chờ đủ N nhánh rồi xử lý từng kết quả thì dùng `mode: append` với `numberInputs` đặt **trong** `parameters` (đặt ở cấp node thì bị bỏ qua).
+- Node httpRequest không có `onError` thì một phản hồi non-2xx dừng cả workflow: không nhận xét, không trạng thái commit, không dọn dẹp. Với `onError: continueRegularOutput`, item lỗi có dạng `{ error: { message, status } }` và **không** mang `role` của payload, nên node hợp nhất đọc kết quả theo tên node (`$('<tên node>').all()`), không theo thứ tự item. Riêng 429, n8n thay `message` bằng lời khuyên của chính nó; mã HTTP nằm ở `error.status`.
+- **Không hoàn tất ≠ sạch.** `02-pr-review-gate.json` chỉ báo `success` khi mọi lượt thẩm định trả HTTP 200, `exit` = 0, có khối `fleet-status` và `outcome` là `success`/`partial` (cùng định nghĩa với `policies.turn_problem` của LangGraph); lượt nào không đạt thì `error` (hoặc `failure` nếu đã có mục chặn). Đổi tên node thẩm định thì sửa cả bảng `REVIEWS` trong node hợp nhất; bước 5e của `validate.sh` bắt chỗ lệch.
+- `description` của commit status trên GitHub tối đa 140 ký tự (dài hơn → 422); node hợp nhất cắt sẵn.
 
 ## Lưu ý môi trường
 
