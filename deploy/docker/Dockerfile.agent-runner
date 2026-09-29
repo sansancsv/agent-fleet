@@ -25,6 +25,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && apt-get update && apt-get install -y --no-install-recommends gh \
  && rm -rf /var/lib/apt/lists/*
 
+# --- Chính npm ----------------------------------------------------------------
+# npm đi kèm ảnh node:24 (11.19.0) mang tar, brace-expansion, ip-address dính CVE
+# mức HIGH đã có bản vá, và trivy trong CI chặn ảnh vì chúng. Nâng npm trong
+# CÙNG major (không nhảy sang npm 12) trước khi cài mọi thứ khác.
+ARG NPM_VERSION=11
+RUN npm install -g "npm@${NPM_VERSION}" \
+ && npm cache clean --force
+
 # --- Công cụ fleet. GHIM PHIÊN BẢN ở môi trường thật. ------------------------
 ARG ACPX_VERSION=latest
 ARG MCPORTER_VERSION=latest
@@ -38,6 +46,13 @@ RUN npm install -g \
 RUN npm install -g \
       @anthropic-ai/claude-code \
       @zed-industries/claude-code-acp \
+ # @zed-industries/claude-code-acp đã ngừng phát triển (đổi tên thành
+ # @agentclientprotocol/claude-agent-acp) và ghim cứng minimatch 10.2.1, dính
+ # CVE-2026-27903/27904 (HIGH). Nâng lên bản vá cùng dòng 10.2.x ngay trong cây
+ # phụ thuộc của adapter (chỉ đổi đúng gói đó); bỏ bước này khi chuyển adapter.
+ && npm --prefix "$(npm root -g)/@zed-industries/claude-code-acp" install \
+      --omit=dev --save-exact --no-package-lock --no-audit --no-fund \
+      'minimatch@~10.2.3' \
  && npm cache clean --force
 
 # Codex và Gemini CLI cài riêng vì nhịp phát hành khác nhau.
