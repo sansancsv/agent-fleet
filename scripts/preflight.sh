@@ -85,12 +85,15 @@ hdr "acpx — tầng thực thi"
 check_sub  acpx exec
 check_sub  acpx sessions
 check_sub  acpx flow
-check_flag acpx exec "--cwd"
-check_flag acpx exec "--format"
-check_flag acpx exec "--deny-all"
-check_flag acpx exec "--approve-all"
-check_flag acpx exec "--json-strict"
-check_flag acpx exec "--suppress-reads"
+# Các cờ dưới đây là tuỳ chọn TOÀN CỤC của `acpx` (run-role.sh đặt chúng trước
+# "<agent> exec"), nên phải dò trong `acpx --help`; `acpx exec --help` chỉ liệt
+# kê -f/--config-option/-h (đối chiếu acpx 0.19.3).
+check_flag acpx "" "--cwd"
+check_flag acpx "" "--format"
+check_flag acpx "" "--deny-all"
+check_flag acpx "" "--approve-all"
+check_flag acpx "" "--json-strict"
+check_flag acpx "" "--suppress-reads"
 
 hdr "openclaw — tầng điều khiển"
 check_sub openclaw agents
