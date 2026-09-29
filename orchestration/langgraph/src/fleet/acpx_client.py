@@ -57,6 +57,11 @@ BACKEND_PROVIDER: dict[str, str] = {
 }
 
 
+# Mốc mở khối trạng thái mà hiến chương (_shared/AGENTS.md §2) bắt mọi agent
+# đặt ở CUỐI phản hồi.
+STATUS_MARKER = "```fleet-status"
+
+
 @dataclass(slots=True)
 class AgentResult:
     role: str
@@ -272,10 +277,9 @@ def _extract_status(text: str) -> dict[str, str]:
     `execution-plane/scripts/run-role.sh` (nhánh chạy qua agent-runner). Hai chỗ
     phải khớp; tests/test_acpx_client.py chạy chính đoạn đó để đối chiếu.
     """
-    marker = "```fleet-status"
-    if marker not in text:
+    if STATUS_MARKER not in text:
         return {}
-    block = text.rsplit(marker, 1)[1].split("```", 1)[0]
+    block = text.rsplit(STATUS_MARKER, 1)[1].split("```", 1)[0]
     status: dict[str, str] = {}
     for row in block.splitlines():
         if ":" in row:
