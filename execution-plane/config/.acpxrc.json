@@ -13,7 +13,7 @@
 
   "//agents": "Ghi đè backend theo repo — ví dụ repo hạ tầng bắt buộc dùng model nội bộ vì mã nguồn không được rời hạ tầng công ty. KHÔNG đặt khoá // bên trong agents — acpx validate mọi khoá ở đây như tên agent thật, xem acpx.global.json.",
   "agents": {
-    "claude": { "argv": ["claude-code-acp"] },
-    "codex": { "argv": ["codex-acp", "--mode", "stable"] }
+    "claude": { "argv": ["claude-agent-acp"] },
+    "codex": { "argv": ["codex-acp"] }
   }
 }

@@ -151,6 +151,12 @@ Phần lớn được `scripts/validate.sh` và `scripts/check-oc-placeholders.p
 - Không đặt khoá chú thích `"//..."` bên trong `mcpServers` (cấp gốc thì được).
 - `mcporter serve` không có auth; cách ly ở tầng mạng (không map port ra host, NetworkPolicy ở K8s).
 
+**acpx + ACP adapter (`execution-plane/config/acpx.global.json`; acpx 0.19.3, claude-agent-acp 0.84.0, codex-acp 2.0.0)**:
+- acpx đẩy mọi `ACPX_AUTH_<X>` thành biến `<X>` cho tiến trình agent (`ACPX_AUTH_OPENAI_API_KEY` → `OPENAI_API_KEY`); khoá model đi đường này. Bước `authenticate` chỉ chạy khi tên biến khớp đúng method id agent quảng bá.
+- codex-acp 2.x quảng bá method `api-key`, nhưng fleet không đặt `ACPX_AUTH_API_KEY` (tên chung đó lọt khỏi việc thu hẹp khoá). Env của agent-runner (compose, K8s, `.env.example` của langgraph) đặt `DEFAULT_AUTH_REQUEST={"methodId":"api-key"}` để adapter tự đăng nhập; thiếu nó mọi lượt codex chết ở `session/new` ("Authentication required"). Vì vậy `authPolicy` phải là `skip`. Không đặt biến này bằng `ENV` trong Dockerfile: BuildKit cảnh báo `SecretsUsedInArgOrEnv` với mọi tên chứa AUTH.
+- codex-acp 2.x không phân tích cờ: cờ lạ bị bỏ qua lặng lẽ, `codex-acp --help` khởi động server rồi treo — đừng gọi trong preflight/healthcheck.
+- Mỗi adapter tự mang runtime (Claude Code native trong SDK; `@openai/codex` trong cây phụ thuộc). Không cài `claude`/`codex` toàn cục vào ảnh.
+
 **Docker (`deploy/docker/`)**: named volume gắn vào thư mục con của image ngoài phải có init container chown trước (`check-volume-perms.py`); image tự build thì tạo sẵn thư mục trong Dockerfile. State của OpenClaw nằm ở `/home/node/.openclaw/state`, không phải `~/.config/openclaw`.
 
 **Kubernetes (`deploy/k8s/`)**:

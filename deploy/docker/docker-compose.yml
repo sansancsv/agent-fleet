@@ -206,6 +206,10 @@ services:
       ACPX_AUTH_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ACPX_AUTH_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ACPX_AUTH_GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # codex-acp 2.x tự đăng nhập bằng OPENAI_API_KEY (acpx đẩy ra từ
+      # ACPX_AUTH_OPENAI_API_KEY) khi phiên cần; thiếu biến này mọi lượt codex
+      # chết ở session/new. Không phải bí mật — xem //authPolicy trong acpx.global.json.
+      DEFAULT_AUTH_REQUEST: '{"methodId":"api-key"}'
       LOCAL_LLM_BASE_URL: ${LOCAL_LLM_BASE_URL:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       FLEET_REPO_ROOT: /srv/repos
