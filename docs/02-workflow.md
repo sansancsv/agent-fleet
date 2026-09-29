@@ -58,6 +58,9 @@ Ba hệ quả thực tế:
    việc danh sách phát hiện có rỗng hay không. `gate()` leo thang khi một vai
    trò thẩm định bắt buộc không hoàn tất; implementer tự báo `blocked`/`rejected`
    hoặc không giao được diff nào thì leo thang ngay, không đưa đi thẩm định.
+   Cũng vậy với chính diff: reviewer chạy `--deny-all` nên `cross_review` tự
+   tính diff và nhúng vào prompt, và diff vượt trần thì leo thang chứ không bị
+   cắt cho vừa — thẩm định nửa diff chỉ cho ra "sạch" cho nửa còn lại.
 
 ---
 

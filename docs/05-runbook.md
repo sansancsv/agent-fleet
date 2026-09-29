@@ -374,15 +374,20 @@ thoát mã 0, có khối `fleet-status` và `outcome` khác `blocked`/`rejected`
 | `summary` bắt đầu bằng | Nghĩa là | Xử lý |
 |---|---|---|
 | `Lượt hiện thực không hoàn tất (...)` | implementer tự báo `blocked`/`rejected`, thoát lỗi, không trả khối trạng thái, hoặc nhánh không có commit nào so với `base_ref` | trả lời câu hỏi của agent in ngay bên dưới; diff rỗng mà agent vẫn nói đã xong thường là lỗi quyền ghi worktree (chú thích EACCES đầu `graph.py`) |
-| `Thẩm định KHÔNG hoàn tất` | ít nhất một vai trò thẩm định bắt buộc không chạy xong — **không** phải "thẩm định sạch" | lý do in theo từng vai trò; `thoát mã 1 — (lỗi: ... 429 ...)` xem bảng ở mục trên; `thiếu khối fleet-status`/`outcome: blocked` xem log lượt đó ở `$FLEET_LOG_DIR/<vai-trò>/` của agent-runner |
+| `Thẩm định KHÔNG hoàn tất` | ít nhất một vai trò thẩm định bắt buộc không chạy xong — **không** phải "thẩm định sạch" | lý do in theo từng vai trò; `thoát mã 1 — (lỗi: ... 429 ...)` xem bảng ở mục trên; `thiếu khối fleet-status`/`outcome: blocked` xem log lượt đó ở `$FLEET_LOG_DIR/<vai-trò>/` của agent-runner; `diff ... lớn hơn trần 96 KiB` → không reviewer nào được gọi (xem đoạn dưới bảng); `không lấy được diff ...` → lỗi git in ngay sau, thường là worktree đã bị xoá hoặc `base_ref` không còn |
 | `Đã sửa N lượt, vẫn còn M mục chặn` | hết `max_revisions` | người xử lý các mục được liệt kê |
 
 Worktree được giữ nguyên trong mọi trường hợp. Đừng "chữa" bằng cách nới luật:
-cho qua khi thẩm định không chạy được chính là lỗi mà cơ chế này chặn. Nếu
-**mọi** quy trình dừng ở thẩm định với reviewer báo không xem được diff: reviewer
-chạy `--deny-all` nên không tự chạy `git diff` được (xem chú thích đầu
-`execution-plane/scripts/fanout-review.sh`), và prompt của `cross_review` chưa
-nhúng sẵn diff.
+cho qua khi thẩm định không chạy được chính là lỗi mà cơ chế này chặn.
+
+Reviewer chạy `--deny-all` nên không tự chạy `git diff` được (xem chú thích đầu
+`execution-plane/scripts/fanout-review.sh`): `cross_review` tự tính diff so với
+`base_ref` và nhúng vào prompt. Diff lớn hơn `REVIEW_DIFF_MAX_BYTES` (96 KiB, đầu
+mục NÚT 5 trong `graph.py`) thì **không** bị cắt cho vừa — reviewer thấy nửa diff
+vẫn báo sạch cho cả diff — mà leo thang: người thẩm định thẳng trong worktree,
+hoặc tách công việc nhỏ hơn rồi chạy lại. Đừng nâng trần để "chữa": prompt đi qua
+argv, và một tham số argv trên Linux tối đa 128 KiB — vượt là lượt thẩm định chết
+ngay ở `execve`, chưa tới model.
 
 ### `git push`/`git clone` từ agent-runner hoặc langgraph báo `Bad credentials` hoặc `Invalid username or token`
 
