@@ -51,6 +51,13 @@ Ba hệ quả thực tế:
 
 3. **Khi không chắc thì nghiêng về phía kiểm soát chặt hơn.** `risk_from_text()`
    trả `"risky"` khi không nhận dạng được nhãn — chứ không trả `"trivial"`.
+   Cùng nguyên tắc: **"không thẩm định được" không bao giờ là "thẩm định sạch"**.
+   Một lượt lỗi (timeout, runner bận, thiếu khoá, thiếu khối `fleet-status`,
+   `outcome: blocked`) cũng cho ra 0 phát hiện, nên code phải nhìn vào tín hiệu
+   có kiểu — mã thoát và khối trạng thái (`turn_problem()`) — chứ không nhìn vào
+   việc danh sách phát hiện có rỗng hay không. `gate()` leo thang khi một vai
+   trò thẩm định bắt buộc không hoàn tất; implementer tự báo `blocked`/`rejected`
+   hoặc không giao được diff nào thì leo thang ngay, không đưa đi thẩm định.
 
 ---
 

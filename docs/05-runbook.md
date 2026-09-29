@@ -18,7 +18,9 @@
 ## Bốn chỉ số cần theo dõi
 
 **1. Tỉ lệ leo thang** — bao nhiêu % công việc kết thúc bằng `outcome: blocked`.
-Tăng đột ngột = model xuống cấp, hoặc quy trình gặp loại việc mới chưa xử lý được.
+Tăng đột ngột = model xuống cấp, quy trình gặp loại việc mới chưa xử lý được,
+hoặc lượt agent không chạy được (runner bận, thiếu khoá) — đầu `summary` nói rõ
+là trường hợp nào (xem mục "Quy trình kết thúc `outcome: blocked`..." bên dưới).
 
 **2. Số vòng sửa lại trung bình.** Gần 0 = thẩm định quá dễ dãi. Gần giới hạn
 (2) = model viết code chưa đủ tốt cho loại việc này.
@@ -361,6 +363,26 @@ Tầng thực thi là một dịch vụ HTTP (`execution-plane/runner/server.mjs
 | `400 cwd phải là thư mục có thật nằm trong /srv/repos` | gọi với thư mục ngoài kho repo | runner cố ý chỉ chạy trong `/srv/repos` |
 
 Kiểm nhanh: `docker compose exec agent-runner curl -s localhost:8787/healthz`.
+
+### Quy trình kết thúc `outcome: blocked` mà không tới bước chờ duyệt
+
+Đồ thị LangGraph **fail closed**: một lượt agent chỉ được tính là hoàn tất khi
+thoát mã 0, có khối `fleet-status` và `outcome` khác `blocked`/`rejected`
+(`policies.turn_problem`). Đầu `summary` (trong phản hồi `/runs/wait` hoặc
+`GET /runs/<id>`) nói leo thang ở đâu:
+
+| `summary` bắt đầu bằng | Nghĩa là | Xử lý |
+|---|---|---|
+| `Lượt hiện thực không hoàn tất (...)` | implementer tự báo `blocked`/`rejected`, thoát lỗi, không trả khối trạng thái, hoặc nhánh không có commit nào so với `base_ref` | trả lời câu hỏi của agent in ngay bên dưới; diff rỗng mà agent vẫn nói đã xong thường là lỗi quyền ghi worktree (chú thích EACCES đầu `graph.py`) |
+| `Thẩm định KHÔNG hoàn tất` | ít nhất một vai trò thẩm định bắt buộc không chạy xong — **không** phải "thẩm định sạch" | lý do in theo từng vai trò; `thoát mã 1 — (lỗi: ... 429 ...)` xem bảng ở mục trên; `thiếu khối fleet-status`/`outcome: blocked` xem log lượt đó ở `$FLEET_LOG_DIR/<vai-trò>/` của agent-runner |
+| `Đã sửa N lượt, vẫn còn M mục chặn` | hết `max_revisions` | người xử lý các mục được liệt kê |
+
+Worktree được giữ nguyên trong mọi trường hợp. Đừng "chữa" bằng cách nới luật:
+cho qua khi thẩm định không chạy được chính là lỗi mà cơ chế này chặn. Nếu
+**mọi** quy trình dừng ở thẩm định với reviewer báo không xem được diff: reviewer
+chạy `--deny-all` nên không tự chạy `git diff` được (xem chú thích đầu
+`execution-plane/scripts/fanout-review.sh`), và prompt của `cross_review` chưa
+nhúng sẵn diff.
 
 ### `git push`/`git clone` từ agent-runner hoặc langgraph báo `Bad credentials` hoặc `Invalid username or token`
 
