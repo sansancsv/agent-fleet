@@ -1,7 +1,7 @@
 {
   "name": "Fleet · Tiếp nhận & định tuyến yêu cầu",
   "meta": {
-    "description": "Cửa vào duy nhất cho mọi yêu cầu từ các phòng ban. Đây là tầng XÁC ĐỊNH: xác thực, kiểm tra quyền, phân loại, rồi mới chuyển sang tầng agent. Không có model nào được gọi trước khi qua hai chốt kiểm tra đầu tiên — đó là cách chặn cả rò rỉ dữ liệu lẫn cháy hoá đơn. Mọi lượt agent đi qua HTTP tới agent-runner; workflow này KHÔNG chạy lệnh shell."
+    "description": "Cửa vào duy nhất cho mọi yêu cầu từ các phòng ban. Đây là tầng XÁC ĐỊNH: xác thực, kiểm tra quyền, phân loại, rồi mới chuyển sang tầng agent. Không có model nào được gọi trước khi qua hai chốt kiểm tra đầu tiên — đó là cách chặn cả rò rỉ dữ liệu lẫn cháy hoá đơn. Yêu cầu phòng ban đi qua chốt dataClass của LangGraph (POST /profiles/<tên>/run) — backend không được mức dữ liệu của hồ sơ cho phép thì bị từ chối, không có model nào thấy dữ liệu. Workflow này KHÔNG gọi thẳng agent-runner và KHÔNG chạy lệnh shell."
   },
   "settings": { "executionOrder": "v1", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "all", "timezone": "Asia/Ho_Chi_Minh" },
   "nodes": [
@@ -24,7 +24,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// CHỐT 1 — Chuẩn hoá và làm sạch đầu vào.\n// Mọi thứ đến từ bên ngoài đều là DỮ LIỆU KHÔNG TIN CẬY.\n// Ta không bao giờ ghép thẳng vào prompt mà không bọc thẻ <untrusted>,\n// và KHÔNG BAO GIỜ ghép vào lệnh shell — workflow này không có node nào chạy shell.\nconst body = $input.first().json.body ?? $input.first().json;\n\nconst clean = (s, max) => String(s ?? '')\n  .replace(/\\u0000/g, '')\n  .slice(0, max);\n\nconst profile = clean(body.profile, 40) || 'engineering';\nconst request = clean(body.request, 8000);\n\n// Quyết định định tuyến làm ở ĐÂY, bằng JS thuần — không phải trong tham số\n// của node Switch. Lý do: node đồ hoạ có schema đổi theo từng phiên bản công\n// cụ (typeVersion) và việc so sánh kiểu do đó không ổn định giữa các bản n8n;\n// một hàm JS trả về đúng MỘT chuỗi thì luôn so sánh bằng '===' được, ở bất kỳ\n// phiên bản n8n nào. Node Switch phía sau chỉ đọc `category`, không tự quyết.\nconst URGENT_RE = /(deploy|rollback|sự cố|incident|production down)/i;\nconst category = URGENT_RE.test(request) ? 'van-hanh'\n  : profile === 'engineering' ? 'ky-thuat'\n  : 'phong-ban-khac';\n\nreturn [{\n  json: {\n    requestId: `REQ-${Date.now().toString(36).toUpperCase()}`,\n    profile,\n    requester: clean(body.requester, 80),\n    request,\n    repo:      clean(body.repo, 200),\n    priority:  ['low','normal','high','urgent'].includes(body.priority) ? body.priority : 'normal',\n    receivedAt: new Date().toISOString(),\n    category,\n  }\n}];"
+        "jsCode": "// CHỐT 1 — Chuẩn hoá và làm sạch đầu vào.\n// Mọi thứ đến từ bên ngoài đều là DỮ LIỆU KHÔNG TIN CẬY.\n// Ta không bao giờ ghép thẳng vào prompt mà không bọc thẻ <untrusted>,\n// và KHÔNG BAO GIỜ ghép vào lệnh shell — workflow này không có node nào chạy shell.\nconst body = $input.first().json.body ?? $input.first().json;\n\nconst clean = (s, max) => String(s ?? '')\n  .replace(/\\u0000/g, '')\n  .slice(0, max);\n\nconst profile = clean(body.profile, 40) || 'engineering';\nconst request = clean(body.request, 8000);\n\n// Quyết định định tuyến làm ở ĐÂY, bằng JS thuần — không phải trong tham số\n// của node Switch. Lý do: node đồ hoạ có schema đổi theo từng phiên bản công\n// cụ (typeVersion) và việc so sánh kiểu do đó không ổn định giữa các bản n8n;\n// một hàm JS trả về đúng MỘT chuỗi thì luôn so sánh bằng '===' được, ở bất kỳ\n// phiên bản n8n nào. Node Switch phía sau chỉ đọc `category`, không tự quyết.\n//\n// Tuyến khẩn cấp gửi nguyên văn yêu cầu sang OpenClaw (Claude, dự phòng OpenAI)\n// mà KHÔNG qua chốt dataClass — nên chỉ hồ sơ engineering được đi tắt. Mọi phòng\n// ban khác luôn vào nhánh phong-ban-khac, nơi LangGraph kiểm backend theo\n// dataClass của hồ sơ trước khi bất kỳ model nào thấy dữ liệu.\nconst URGENT_RE = /(deploy|rollback|sự cố|incident|production down)/i;\nconst category = profile !== 'engineering' ? 'phong-ban-khac'\n  : URGENT_RE.test(request) ? 'van-hanh'\n  : 'ky-thuat';\n\nreturn [{\n  json: {\n    requestId: `REQ-${Date.now().toString(36).toUpperCase()}`,\n    profile,\n    requester: clean(body.requester, 80),\n    request,\n    repo:      clean(body.repo, 200),\n    priority:  ['low','normal','high','urgent'].includes(body.priority) ? body.priority : 'normal',\n    receivedAt: new Date().toISOString(),\n    category,\n  }\n}];"
       },
       "id": "n-normalize",
       "name": "Chuẩn hoá đầu vào",
@@ -150,23 +150,44 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.AGENT_RUNNER_URL }}/run",
+        "url": "={{ $env.LANGGRAPH_URL }}/profiles/{{ $('Chuẩn hoá đầu vào').item.json.profile }}/run",
         "sendHeaders": true,
         "headerParameters": { "parameters": [
-          { "name": "Authorization", "value": "=Bearer {{ $env.AGENT_RUNNER_TOKEN }}" },
+          { "name": "Authorization", "value": "=Bearer {{ $env.LANGGRAPH_TOKEN }}" },
           { "name": "X-Fleet-Request-Id", "value": "={{ $('Chuẩn hoá đầu vào').item.json.requestId }}" }
         ]},
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ role: 'analyst', cwd: '/srv/repos', timeoutS: 900, prompt: 'Yêu cầu từ phòng ' + $('Chuẩn hoá đầu vào').item.json.profile + '. Trả lời ngắn, kèm nguồn.\\n\\n<untrusted source=\"requester\">\\n' + $('Chuẩn hoá đầu vào').item.json.request + '\\n</untrusted>' }) }}",
-        "options": { "timeout": 960000 }
+        "jsonBody": "={{ JSON.stringify({ task_id: $('Chuẩn hoá đầu vào').item.json.requestId, requester: $('Chuẩn hoá đầu vào').item.json.requester, request: $('Chuẩn hoá đầu vào').item.json.request }) }}",
+        "options": { "timeout": 960000, "response": { "response": { "fullResponse": true, "neverError": true } } }
       },
       "id": "n-to-dept",
       "name": "→ Agent phòng ban",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [600, 380],
-      "notes": "Yêu cầu ngắn của phòng ban ngoài kỹ thuật: một lượt agent qua API agent-runner. Nội dung yêu cầu đi trong JSON body — không có shell nào diễn giải nó."
+      "notes": "Yêu cầu của phòng ban ngoài kỹ thuật: MỘT lượt agent, nhưng qua chốt dataClass của LangGraph (POST /profiles/<tên>/run), KHÔNG gọi thẳng agent-runner. server.py kiểm backend của vai trò phòng ban (analyst → Gemini) có được dataClass của hồ sơ cho phép không; không thì trả 403 và không model nào thấy dữ liệu. Nội dung yêu cầu đi trong JSON body — không có shell nào diễn giải nó."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.statusCode === 200 }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "n-if-dept",
+      "name": "Qua chốt dataClass?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [820, 380],
+      "notes": "200 = đã qua chốt và lượt agent đã chạy. Mọi mã khác (403 chốt dataClass/requester, 404, 5xx) đi nhánh từ chối — fail closed."
     },
     {
       "parameters": {
@@ -189,6 +210,19 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [340, 460]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: ($json.body && $json.body.detail) || 'Không chạy được yêu cầu phòng ban', requestId: $('Chuẩn hoá đầu vào').item.json.requestId }) }}",
+        "options": { "responseCode": "={{ Number($json.statusCode) >= 400 ? Number($json.statusCode) : 502 }}" }
+      },
+      "id": "n-deny-dept",
+      "name": "Từ chối (chốt dataClass)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1080, 460],
+      "notes": "Chuyển nguyên mã và lý do của server.py cho bên gửi: 403 khi dataClass không cho phép backend (ví dụ finance/legal restricted, support confidential), 5xx khi agent-runner hỏng."
     },
     {
       "parameters": {
@@ -221,7 +255,13 @@
     },
     "→ SRE (khẩn cấp)": { "main": [[{ "node": "Ghi nhật ký kiểm toán", "type": "main", "index": 0 }]] },
     "→ LangGraph (quy trình dài)": { "main": [[{ "node": "Ghi nhật ký kiểm toán", "type": "main", "index": 0 }]] },
-    "→ Agent phòng ban": { "main": [[{ "node": "Ghi nhật ký kiểm toán", "type": "main", "index": 0 }]] },
+    "→ Agent phòng ban": { "main": [[{ "node": "Qua chốt dataClass?", "type": "main", "index": 0 }]] },
+    "Qua chốt dataClass?": {
+      "main": [
+        [{ "node": "Ghi nhật ký kiểm toán", "type": "main", "index": 0 }],
+        [{ "node": "Từ chối (chốt dataClass)", "type": "main", "index": 0 }]
+      ]
+    },
     "Ghi nhật ký kiểm toán": { "main": [[{ "node": "Phản hồi", "type": "main", "index": 0 }]] }
   },
   "pinData": {}

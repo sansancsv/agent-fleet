@@ -14,7 +14,8 @@
 
 name: string                # tên hiển thị của phòng ban
 dataClass: string           # public | internal | confidential | restricted
-                            # -> quyết định model nào được phép (xem policies.py)
+                            # -> quyết định backend nào được phép (nguồn sự thật:
+                            #    policy/model-routing.yaml; validate.sh bước 8a)
 
 requesters: [string]        # ai được gửi yêu cầu; "*" = mọi nhân viên
 approvers: [string]         # ai được duyệt ở checkpoint; KHÔNG được trùng requester
@@ -23,7 +24,8 @@ approvers: [string]         # ai được duyệt ở checkpoint; KHÔNG đượ
 capabilityPack: string      # tên file trong capability-plane/packs/
 dataSources: [string]       # nguồn dữ liệu được phép đọc (khai báo để agent biết)
 
-agents:
+agents:                     # MỌI backend ở đây phải nằm trong allowedBackends
+                            # của dataClass — validate.sh bước 8a từ chối nếu không
   classifier: string        # backend acpx dùng để phân loại (rẻ, nhanh)
   drafter: string           # backend soạn thảo
   reviewer: string          # backend thẩm định — PHẢI khác drafter

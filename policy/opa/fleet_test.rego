@@ -33,3 +33,17 @@ test_du_lieu_han_che_cho_model_noi_bo if {
 test_vuot_ngan_sach_bi_chan if {
 	not authz.allow with input as object.union(base, {"spent_usd": 9.0})
 }
+
+# Vi phạm cũ của support.yaml: confidential từng phân loại và thẩm định trên Gemini.
+test_du_lieu_mat_chan_gemini if {
+	not authz.allow with input as object.union(base, {"data_class": "confidential", "backend": "gemini"})
+}
+
+test_du_lieu_mat_cho_claude if {
+	authz.allow with input as object.union(base, {"data_class": "confidential", "backend": "claude"})
+}
+
+# Fail closed: mức dữ liệu lạ (hồ sơ gõ nhầm) không được hiểu là "không ràng buộc".
+test_muc_du_lieu_la_bi_chan if {
+	not authz.allow with input as object.union(base, {"data_class": "bi-mat", "backend": "local-llm"})
+}

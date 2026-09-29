@@ -74,6 +74,14 @@ docker compose exec n8n n8n export:workflow --all --separate --output=/workflows
    phân quyền phải xong trước node đầu tiên chạm tới agent. Prompt có thể bị dẫn
    dụ, HTTP 403 thì không.
 
+   Yêu cầu gắn với một hồ sơ phòng ban (tức là có `dataClass`) **không** gọi
+   thẳng `POST $AGENT_RUNNER_URL/run`: agent-runner không biết hồ sơ nên không
+   chặn được dữ liệu `restricted`/`confidential` đi tới Gemini. Gọi
+   `POST $LANGGRAPH_URL/profiles/<tên>/run` với `{ task_id, requester, request }`
+   — server.py kiểm người gửi VÀ backend theo `dataClass` trước khi có lượt agent
+   nào, trả 403 kèm lý do nếu không được phép. `scripts/validate.sh` bước 8a từ
+   chối `01-intake-router.json` nếu nó gọi thẳng agent-runner.
+
 2. **Mọi dữ liệu ngoài đều là dữ liệu không tin cậy.** Nội dung webhook, email,
    issue, kết quả tìm kiếm — khi đưa vào prompt phải bọc trong thẻ
    `<untrusted source="...">`. Đây là phòng thủ chính chống chèn lệnh qua prompt.

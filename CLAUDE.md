@@ -73,13 +73,14 @@ Trên đó: **n8n** (`orchestration/n8n/`) cho quy trình nghiệp vụ liên ph
 
 Luồng một yêu cầu: Slack → gateway tra `bindings.json` → agent `orchestrator` → LangGraph `graph.py` (`prepare` tạo worktree → `triage` → [`design` nếu risky] → `implement` → `cross_review` song song → `gate` → `approval` interrupt → `open_pr`) → mỗi lượt agent đi qua `acpx_client.run_role` → dịch vụ agent-runner (`execution-plane/runner/server.mjs`, `POST /run`, Bearer `AGENT_RUNNER_TOKEN`) spawn `run-role.sh` → `acpx <backend> exec` → mọi truy cập ra ngoài đi qua **một** cầu nối mcporter (`http://mcporter:7420/mcp`).
 
-Tầng thực thi là dịch vụ HTTP, không phải container để `docker exec`. n8n gọi `POST /run`, `POST /pr/checkout`, `POST /pr/cleanup` bằng node httpRequest; `validate.sh` cấm node executeCommand trong `orchestration/n8n/workflows/`. Không đặt `AGENT_RUNNER_URL` thì `run_role` spawn acpx tại chỗ (dev/test). Prompt luôn đi qua argv của spawn hoặc JSON body, không bao giờ qua chuỗi shell.
+Tầng thực thi là dịch vụ HTTP, không phải container để `docker exec`. n8n gọi `POST /run`, `POST /pr/checkout`, `POST /pr/cleanup` bằng node httpRequest; `validate.sh` cấm node executeCommand trong `orchestration/n8n/workflows/`. Ngoại lệ: yêu cầu gắn hồ sơ phòng ban (có `dataClass`) KHÔNG gọi thẳng `POST /run` mà đi qua `POST /profiles/<tên>/run` của LangGraph — chốt dataClass (xem "Cơ chế mở rộng phòng ban"); `validate.sh` bước 8a từ chối `01-intake-router.json` nếu nó gọi thẳng agent-runner. Không đặt `AGENT_RUNNER_URL` thì `run_role` spawn acpx tại chỗ (dev/test). Prompt luôn đi qua argv của spawn hoặc JSON body, không bao giờ qua chuỗi shell.
 
 ### Nguyên tắc thiết kế cần giữ khi sửa
 
 - **Xác định bọc ngoài, phi xác định bên trong.** Model *nêu phát hiện*; code *quyết định*. `gate()` trong `graph.py`, `parse_findings`/`risk_from_text` trong `policies.py` là hàm thuần tuý, có test. Không rẽ nhánh bằng cách đoán nội dung phản hồi; ép đầu ra model về tập nhãn hữu hạn, và khi không nhận dạng được thì nghiêng về mức chặt hơn (`risky`).
 - **BLOCKER/CRITICAL không có `file:dòng` thì không phải phát hiện** (bị `parse_findings` loại). Mọi agent phải kết thúc bằng khối ```` ```fleet-status ```` (xem `_shared/AGENTS.md`); `run-role.sh` và `acpx_client._extract_status` phân tích khối này.
 - **Reviewer phải khác nhà cung cấp với implementer** (Claude viết, Codex/Gemini chấm) — tránh mô hình tự chấm điểm chính mình. `validate.sh` bước 8 cưỡng chế cho mọi profile.
+- **`dataClass` thắng mọi thứ, và không có đường "chạy tạm".** Backend không được mức dữ liệu của hồ sơ cho phép thì từ chối (403), không rơi về backend khác; `dataClass` thiếu/lạ cũng bị từ chối. Chốt đặt ở `server.py`, nơi biết cả hồ sơ lẫn backend — không ở agent-runner (không có bảng vai trò) hay n8n (không giữ bản sao chính sách).
 - **Mọi vòng lặp có giới hạn** (`max_revisions`, `limits.maxStepRuns`); hết lượt thì leo thang cho người, không thử tiếp.
 - **Bộ nhớ và vết chạy fail-soft.** `fleet/memory.py` và `fleet/trajectory.py` nuốt mọi lỗi I/O có chủ đích: volume hỏng thì mất bộ nhớ/số liệu, không được làm hỏng một lượt giao hàng tính năng. Đừng thêm `raise` vào hai module này.
 - **Mọi thứ trong bộ nhớ đều có trần** (`MAX_LESSONS`, `MAX_PROGRESS_LINES`, `MAX_INJECT_CHARS`) để không lặng lẽ ăn hết cửa sổ ngữ cảnh của mọi lượt gọi.
@@ -98,11 +99,13 @@ Khi thêm/bớt vai trò hoặc đổi backend, cập nhật tất cả:
 4. `execution-plane/scripts/run-role.sh` — bảng `case "$ROLE"`
 5. `orchestration/langgraph/src/fleet/acpx_client.py` — `ROLE_BACKENDS`
 
-Chỉ mục 1↔2 được script kiểm tự động; 3–5 phải tự soát.
+Mục 1↔2 (tập vai trò) do `validate.sh` bước 6 kiểm; backend của từng vai trò ở 4↔5 do bước 8a kiểm (chốt dataClass tra `ROLE_BACKENDS`, còn agent-runner chạy theo `run-role.sh` — lệch nhau là chốt kiểm sai backend). Quyền theo vai trò và mục 3 vẫn phải tự soát.
 
 ### Cơ chế mở rộng phòng ban
 
-Thêm phòng ban = thêm `profiles/<tên>.yaml` (schema ở `profiles/_schema.yaml`) + `capability-plane/packs/<capabilityPack>.json`. Không sửa code: `dept-request.flow.ts` và `server.py` (`GET /profiles/<tên>/authorize`) đọc profile lúc chạy. `validate.sh` kiểm profile trỏ tới pack có thật và drafter ≠ reviewer (trừ `dataClass: restricted`). `dataClass` quyết định backend được phép (`policies.MODEL_POLICY`, `model-routing.yaml`, `fleet.rego` — ba nơi phải khớp).
+Thêm phòng ban = thêm `profiles/<tên>.yaml` (schema ở `profiles/_schema.yaml`) + `capability-plane/packs/<capabilityPack>.json`. Không sửa code: `dept-request.flow.ts` và `server.py` (`GET /profiles/<tên>/authorize`, `POST /profiles/<tên>/run`) đọc profile lúc chạy. `validate.sh` kiểm profile trỏ tới pack có thật, drafter ≠ reviewer (trừ `dataClass: restricted`), và (bước 8a, `scripts/check-model-policy.py`) mọi `agents.*` nằm trong `allowedBackends` của `dataClass`. `dataClass` quyết định backend được phép: nguồn sự thật là `policy/model-routing.yaml`; `policies.MODEL_POLICY` và `fleet.rego` phải khớp — bước 8a kiểm.
+
+Cưỡng chế lúc chạy chỉ có ở đường n8n cho phòng ban: `01-intake-router.json` gửi mọi hồ sơ khác `engineering` tới `POST /profiles/<tên>/run`; `server.py` kiểm requester rồi gọi `assert_backend_allowed(backend của vai trò analyst, dataClass)` TRƯỚC lượt agent. `analyst` chạy Gemini nên chỉ hồ sơ public/internal qua được; support (confidential), finance/legal (restricted) nhận 403 cho tới khi có đường chạy trên `local-llm`. Tuyến khẩn cấp (SRE qua OpenClaw) không có chốt nên chỉ dành cho `engineering`. CHƯA cưỡng chế lúc chạy: `POST /runs/wait` (n8n luôn gửi `engineering`), `dept-request.flow.ts` (chỉ có phép kiểm tĩnh), OPA (chỉ có test). Chi tiết và bảng trạng thái từng hồ sơ: `docs/03-mo-rong-phong-ban.md`.
 
 ### Bộ nhớ, vết chạy, chỉ số
 
@@ -124,9 +127,9 @@ Chi phí token trong `metrics.py` cố ý trả `None` kèm lý do, không quy �
 
 ### API LangGraph mà n8n gọi
 
-`server.py` là FastAPI tự viết (không dùng `langgraph up`). Endpoint n8n phụ thuộc: `POST /runs/wait`, `POST /runs/{thread_id}/resume`, `GET /runs/{thread_id}`, `GET /profiles/{name}/authorize`, `GET /ok`. Đổi tên/hình dạng các endpoint này phải sửa cả `orchestration/n8n/workflows/*.json` và `tests/test_server.py`.
+`server.py` là FastAPI tự viết (không dùng `langgraph up`). Endpoint n8n phụ thuộc: `POST /runs/wait`, `POST /runs/{thread_id}/resume`, `GET /runs/{thread_id}`, `GET /profiles/{name}/authorize`, `POST /profiles/{name}/run`, `GET /ok`. Đổi tên/hình dạng các endpoint này phải sửa cả `orchestration/n8n/workflows/*.json` và `tests/test_server.py`.
 
-Hai chốt fail-closed trong `server.py`: mọi endpoint trừ `/ok` đòi `Authorization: Bearer $LANGGRAPH_TOKEN` (thiếu biến → 503 cho tất cả); `/runs/{id}/resume` chỉ chấp nhận `by` nằm trong `approvers` của hồ sơ gắn với thread (`profile` trong state, mặc định `engineering`), nếu không → 403 và ghi `permission.decision` ra stdout.
+Ba chốt fail-closed trong `server.py`: mọi endpoint trừ `/ok` đòi `Authorization: Bearer $LANGGRAPH_TOKEN` (thiếu biến → 503 cho tất cả); `/runs/{id}/resume` chỉ chấp nhận `by` nằm trong `approvers` của hồ sơ gắn với thread (`profile` trong state, mặc định `engineering`), nếu không → 403 và ghi `permission.decision` ra stdout; `/profiles/{name}/run` chỉ chạy lượt agent khi requester hợp lệ VÀ backend của `DEPT_ROLE` được `dataClass` của hồ sơ cho phép, nếu không → 403, ghi `policy.decision`/`permission.decision` ra stdout và `permission.denied` vào vết chạy, không có lượt agent nào.
 
 Khi thêm endpoint mới: gắn `dependencies=[Protected]` (trừ healthcheck), và trong `tests/test_server.py` gửi header `AUTH` (fixture `client` đã đặt `LANGGRAPH_TOKEN`). Khi thêm điểm cuối cho runner (`server.mjs`): thêm vào bảng `ROUTES`, kiểm đầu vào bằng regex/đường dẫn tuyệt đối trong `FLEET_REPO_ROOT` như các handler hiện có, không bao giờ dựng chuỗi shell. Runner cố ý không có bảng vai trò riêng (chỉ kiểm regex rồi giao cho `run-role.sh`) để không thành nơi khai vai trò thứ sáu.
 
@@ -170,7 +173,9 @@ Phần lớn được `scripts/validate.sh` và `scripts/check-oc-placeholders.p
 
 ## Roadmap
 
-- **K8s**: manifest ở `deploy/k8s/` chưa apply lên cụm thật — cần kiểm chứng NetworkPolicy hai chiều (mcporter, langgraph) trước khi coi là production-ready.
+- **K8s**: manifest ở `deploy/k8s/` chưa apply lên cụm thật — cần kiểm chứng NetworkPolicy hai chiều (mcporter, langgraph) trước khi coi là production-ready. `70-langgraph.yaml` cũng chưa mount `profiles/` (`FLEET_PROFILES_DIR`): mọi endpoint theo hồ sơ (`/authorize`, `/resume`, `/profiles/{name}/run`) trả 404 — fail closed — cho tới khi có ConfigMap.
+- **local-llm**: `acpx.global.json` trỏ backend `local-llm` tới `/fleet/bin/local-acp-bridge.mjs`, file chưa có trong repo → `restricted` (finance, legal) không có đường chạy hợp lệ, và `support` (confidential) không chạy được vì thẩm định chéo cần local-llm. Cần dựng bridge (acpx 0.13.2 không thay `${BIẾN}` trong `mcpServers.url`; với `argv` của agent thì chưa kiểm — cho bridge tự đọc `LOCAL_LLM_BASE_URL` từ môi trường cho chắc), rồi thêm một vai trò chỉ đọc chạy `local-llm` để `server.py` chọn theo `dataClass` trên đường n8n.
+- **`/runs/wait` chưa kiểm dataClass**: n8n luôn gửi `engineering` nên hôm nay không có vi phạm; trước khi cho hồ sơ khác dùng đồ thị kỹ thuật, thêm chốt như `/profiles/{name}/run` cho backend của mọi vai trò mà đồ thị gọi.
 - **Duyệt người thật**: chưa có kênh duyệt cho `POST /runs/<id>/resume` ngoài gọi API trực tiếp — cần Slack qua n8n hoặc một trang duyệt tối giản.
 - **Slack qua OpenClaw**: `openclaw plugins install` chưa cài được plugin Slack với kiến trúc `$include` hiện tại — hướng khả thi: tự tải gói, trỏ qua `plugins.load.paths`, bỏ qua bước "install" của CLI.
 - **Chi phí token**: `metrics.py` chưa đo được token thật — chờ acpx phơi số token rồi bổ sung vào `trajectory.step()`.

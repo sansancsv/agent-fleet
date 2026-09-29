@@ -236,6 +236,7 @@ trong LangGraph. Hết lượt thì leo thang cho người — không thử ti�
 - [ ] `agent-runner` chạy non-root, có runtime sandbox
 - [ ] `AGENT_RUNNER_TOKEN` và `LANGGRAPH_TOKEN` đã đặt (cả hai dịch vụ từ chối chạy/phục vụ khi thiếu)
 - [ ] Danh sách `approvers` trong mọi `profiles/*.yaml` là người thật, khác `requesters` với dữ liệu confidential/restricted
+- [ ] Không hồ sơ nào bị hạ `dataClass` chỉ để "cho chạy được" khi `local-llm` chưa có — 403 từ chốt dataClass (`POST /profiles/<tên>/run`) là hành vi đúng (`validate.sh` bước 8a canh phần tĩnh)
 - [ ] Không workflow n8n nào có node executeCommand (`validate.sh` bước 5c)
 - [ ] Nhật ký kiểm toán đang chảy vào hệ thống log tập trung
 - [ ] Ngân sách và giới hạn vòng lặp đã đặt

@@ -88,18 +88,24 @@ Trong `control-plane/config.d/channels.json` thêm một `accountId`, và trong
 kiện để phân quyền và tính chi phí tách bạch.
 
 ⚠️ Kênh Slack cho OpenClaw hiện chưa bật được trên bản CLI đang dùng (xem
-`docs/00-kien-truc.md`). Thay thế tạm thời: một Form Trigger hoặc Webhook
-Trigger riêng trong n8n cho mỗi phòng ban, gọi cùng `dept-request.flow.ts`.
+`docs/00-kien-truc.md`). Thay thế tạm thời: gửi vào webhook tiếp nhận của n8n
+(`01-intake-router.json`, trường `profile: <tên>`), hoặc một Form/Webhook
+Trigger riêng cho mỗi phòng ban gọi cùng đường đó. Lưu ý: đường n8n hiện chỉ
+chạy MỘT lượt agent (vai trò `analyst`) qua chốt dataClass, CHƯA chạy
+`dept-request.flow.ts` — xem mục "Bốn mức nhạy cảm dữ liệu" bên dưới.
 
 ### Bước 4 — Kiểm chứng
 ```bash
 ./scripts/validate.sh
 ```
-Script sẽ báo lỗi nếu: gói năng lực không tồn tại, hoặc người soạn và người thẩm
-định trùng backend (trừ trường hợp `dataClass: restricted`).
+Script sẽ báo lỗi nếu: gói năng lực không tồn tại; người soạn và người thẩm
+định trùng backend (trừ trường hợp `dataClass: restricted`); hoặc một backend
+trong `agents.*` không nằm trong `allowedBackends` của `dataClass` của hồ sơ
+(bước 8a, đọc `policy/model-routing.yaml`).
 
 **Xong.** Không sửa code, không deploy lại. Flow chung
-`execution-plane/flows/dept-request.flow.ts` đọc hồ sơ này lúc chạy.
+`execution-plane/flows/dept-request.flow.ts` đọc hồ sơ này lúc chạy; đường n8n
+dùng `requesters` và `dataClass` của hồ sơ qua `server.py`.
 
 ---
 
@@ -114,11 +120,63 @@ Script sẽ báo lỗi nếu: gói năng lực không tồn tại, hoặc ngư�
 | `confidential` | dữ liệu khách hàng đã ẩn danh | Claude, model tự host | yêu cầu zero-retention |
 | `restricted` | lương, hồ sơ nhân sự, hợp đồng | **chỉ model tự host** | không ra Internet |
 
-Ràng buộc này được khai báo ở ba nơi phải khớp nhau: `policies.py::MODEL_POLICY`,
-`policy/opa/fleet.rego`, và `policy/model-routing.yaml`. Thứ thực sự cưỡng chế
-lúc chạy hôm nay là hồ sơ phòng ban (trường `agents.*` chọn backend) cộng
-NetworkPolicy của Kubernetes; `assert_backend_allowed` và OPA có test nhưng chưa
-được gọi trong đường chạy — việc nối chúng nằm trong lộ trình cải tiến.
+Ràng buộc này khai ở ba bảng: `policy/model-routing.yaml` (nguồn sự thật),
+`policies.py::MODEL_POLICY` và `policy/opa/fleet.rego`. Nó được cưỡng chế ở hai
+tầng.
+
+**Tĩnh — `scripts/validate.sh` bước 8a** (`scripts/check-model-policy.py`):
+
+- mọi backend trong `agents.*` của mọi hồ sơ phải nằm trong `allowedBackends`
+  của `dataClass` của chính hồ sơ đó; `dataClass` lạ hoặc thiếu `agents` là lỗi;
+- `MODEL_POLICY` và `allowed_backends` của rego phải khớp `model-routing.yaml`;
+- backend của từng vai trò trong `ROLE_BACKENDS` (`acpx_client.py`) phải trùng
+  bảng `case "$ROLE"` trong `run-role.sh`: chốt lúc chạy tra bảng thứ nhất,
+  agent-runner chạy theo bảng thứ hai;
+- `01-intake-router.json` không được gọi thẳng agent-runner.
+
+**Lúc chạy — `POST /profiles/<tên>/run` trong `server.py`.** Đây là đường n8n
+dành cho phòng ban ngoài kỹ thuật. Trước khi có lượt agent nào, server.py kiểm
+người gửi thuộc `requesters`, rồi gọi `assert_backend_allowed(<backend của vai
+trò analyst>, dataClass)`. Không được phép — kể cả `dataClass` thiếu hoặc gõ
+nhầm — thì trả 403 kèm lý do, ghi audit ra stdout và vào vết chạy
+(`permission.denied`). Không có đường "chạy tạm" trên backend khác. Workflow n8n
+chuyển nguyên mã và lý do đó cho bên gửi. Tuyến khẩn cấp của n8n (SRE qua
+OpenClaw — Claude, dự phòng OpenAI) không qua chốt này, nên chỉ hồ sơ
+`engineering` được đi tắt; phòng ban khác luôn đi qua chốt.
+
+Hôm nay `analyst` chạy Gemini, nên trạng thái thật của từng hồ sơ là:
+
+| Hồ sơ | dataClass | Đường n8n (một lượt `analyst`) | `dept-request.flow.ts` |
+|---|---|---|---|
+| engineering | internal | không dùng — đi LangGraph `/runs/wait` hoặc tuyến SRE | — |
+| marketing | internal | chạy trên Gemini | Claude soạn, Gemini thẩm định |
+| support | confidential | **403** — Gemini không được phép | dừng ở bước phân loại (local-llm chưa có) |
+| finance, legal | restricted | **403** — chỉ local-llm được phép | dừng ở bước phân loại (local-llm chưa có) |
+
+**Đánh đổi: local-llm chưa dựng.** Backend `local-llm` trong
+`execution-plane/config/acpx.global.json` trỏ tới `/fleet/bin/local-acp-bridge.mjs`,
+file chưa có trong repo. Vì vậy `restricted` chưa có đường chạy hợp lệ nào, và
+`support` không chạy được: với `confidential`, cặp duy nhất vừa đúng chính sách
+vừa khác nhà cung cấp khi thẩm định chéo là Claude + local-llm. Fleet chọn TỪ
+CHỐI có lý do rõ ràng thay vì âm thầm chạy trên backend không được phép. Hạ
+`dataClass` để "cho chạy được" là quyết định của người sở hữu dữ liệu, không
+phải của fleet. Để mở lại các hồ sơ này cần: (1) dựng bridge; (2) một vai trò
+chỉ đọc chạy trên `local-llm` cho đường n8n — khai đủ năm nơi như mọi vai trò
+mới (xem `CLAUDE.md`) — và cho `server.py` chọn vai trò theo `dataClass`.
+
+**Chưa được cưỡng chế lúc chạy:**
+
+- `POST /runs/wait` (đồ thị kỹ thuật) không kiểm `dataClass`. n8n luôn gửi hồ sơ
+  `engineering` nên hôm nay không có vi phạm, nhưng ai giữ `LANGGRAPH_TOKEN` gọi
+  thẳng với hồ sơ khác sẽ chạy Claude và Codex trên dữ liệu đó.
+- `dept-request.flow.ts` đọc `agents.*` của hồ sơ và chạy thẳng: nó chỉ được bảo
+  vệ bởi bước 8a. Hồ sơ bị sửa trên máy chủ mà không qua `validate.sh` thì flow
+  chạy theo hồ sơ đó.
+- OPA (`fleet.rego`) vẫn chỉ có test, chưa được gọi trong đường chạy.
+- Chat trực tiếp với agent OpenClaw không đi qua hồ sơ, nên không có
+  `dataClass` nào để kiểm.
+- NetworkPolicy của Kubernetes không hiểu tên miền, nên không phân biệt được
+  "gọi Gemini" với "gọi Claude"; nó không phải lớp cưỡng chế ràng buộc này.
 
 ---
 
@@ -126,13 +184,20 @@ NetworkPolicy của Kubernetes; `assert_backend_allowed` và OPA có test nhưng
 
 Chín vai trò trong `agents.json` là của phòng kỹ thuật. Phòng ban khác dùng lại:
 
-- `analyst` — dùng chung, mọi phòng ban (chỉ đọc)
+- `analyst` — dùng chung (chỉ đọc); đường n8n cho phòng ban chạy vai trò này
 - `docs-writer` — dùng chung cho mọi việc soạn thảo
 - `orchestrator` — dùng chung, tiếp nhận và định tuyến
 
+Vai trò dùng chung vẫn chịu `dataClass`: backend của vai trò phải nằm trong
+`allowedBackends` của hồ sơ. `analyst` và `docs-writer` chạy Gemini nên chỉ phục
+vụ được hồ sơ `public`/`internal`; `orchestrator` chạy Claude nên không phục vụ
+được `restricted`.
+
 Chỉ tạo vai trò mới khi **quyền của nó khác** những vai trò đã có. Tạo vai trò
 mới chỉ vì "công việc khác nhau" là sai — công việc khác nhau thể hiện ở
-`systemPrompt` trong hồ sơ, không phải ở vai trò mới.
+`systemPrompt` trong hồ sơ, không phải ở vai trò mới. Backend cũng là một thứ
+"quyền" theo nghĩa này: vai trò chỉ đọc chạy trên `local-llm` cho hồ sơ
+`restricted` là vai trò mới hợp lệ.
 
 ---
 
