@@ -37,7 +37,7 @@ from langgraph.types import Command, interrupt
 from . import memory, trajectory
 from .acpx_client import STATUS_MARKER, AgentResult, fanout, run_role
 from .policies import parse_findings, required_reviewers, risk_from_text, turn_problem
-from .state import FleetState, ReviewRun, blockers, initial_state
+from .state import FleetState, ReviewRun, blockers, current_findings, initial_state
 
 REPO_ROOT = os.environ.get("FLEET_REPO_ROOT", "/srv/repos")
 
@@ -291,11 +291,14 @@ def _diff_problem(state: FleetState) -> str:
 
 
 async def implement(state: FleetState) -> dict:
+    # Lượt sửa lại = vòng thẩm định vừa xong còn mục chặn (gate → "revise").
+    # KHÔNG dựa vào `revision_count > 0`: bộ đếm chỉ tăng khi CÓ góp ý, nên
+    # điều kiện đó không bao giờ đúng — vòng sửa từng chạy lại mà không có góp
+    # ý nào, và không bao giờ chạm tới max_revisions.
+    todo = blockers(state)
     feedback = ""
-    if state.get("revision_count", 0) > 0:
-        items = "\n".join(
-            f"- [{f['severity']}] {f['location']}: {f['detail']}" for f in blockers(state)
-        )
+    if todo:
+        items = "\n".join(f"- [{f['severity']}] {f['location']}: {f['detail']}" for f in todo)
         feedback = (
             "\n\nĐây là lượt sửa lại. CHỈ xử lý các mục dưới đây, không mở rộng phạm vi:\n"
             + _untrusted("review", items)
@@ -367,7 +370,7 @@ async def cross_review(state: FleetState) -> dict:
     transcripts = []
     reviews: list[ReviewRun] = []
     for r in results:
-        mine = parse_findings(r.role, r.text)
+        mine = [{**f, "round": rnd} for f in parse_findings(r.role, r.text)]
         findings.extend(mine)
         transcripts.append({"node": f"review:{r.role}", "text": r.text})
         # Lượt này có HOÀN TẤT không. `fanout` đổi exception (timeout, runner
@@ -443,7 +446,7 @@ def human_approval(state: FleetState) -> Command:
             "branch": state.get("branch"),
             "risk": state.get("risk"),
             "blockers": len(blockers(state)),
-            "findings": state.get("findings", [])[:20],
+            "findings": current_findings(state)[:20],
             "question": "Duyệt mở pull request?",
         }
     )
@@ -554,10 +557,10 @@ def _pr_body(state: FleetState) -> str:
              f"Mức rủi ro: `{state.get('risk')}`",
              f"Số lượt sửa theo góp ý: {state.get('revision_count', 0)}",
              f"Người duyệt: {state.get('approved_by', '—')}", ""]
-    if state.get("findings"):
+    if current_findings(state):
         lines += ["### Phát hiện của thẩm định tự động", ""]
         lines += [f"- **{f['severity']}** `{f['location']}` — {f['detail']}"
-                  for f in state["findings"][:30]]
+                  for f in current_findings(state)[:30]]
     lines += ["", "_PR do Agent Fleet tạo. Vẫn cần người review trước khi merge._"]
     return "\n".join(lines)
 

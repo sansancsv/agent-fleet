@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import operator
 import time
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 
 Risk = Literal["trivial", "standard", "risky"]
 Outcome = Literal["success", "partial", "blocked", "rejected"]
@@ -25,6 +25,7 @@ class Finding(TypedDict):
     severity: str          # BLOCKER | MAJOR | MINOR | NIT | CRITICAL
     location: str          # file:dòng
     detail: str
+    round: NotRequired[int]  # vòng thẩm định đã nêu nó (= revision_count); thiếu = vòng 0
 
 
 class ReviewRun(TypedDict):
@@ -101,5 +102,16 @@ def initial_state(**kwargs) -> FleetState:
     return base
 
 
+def current_findings(state: FleetState) -> list[Finding]:
+    """Phát hiện của vòng thẩm định HIỆN TẠI.
+
+    `findings` cộng dồn qua mọi vòng (operator.add). Mục đã sửa ở vòng trước vẫn
+    nằm đó; đọc cả danh sách thì một mục đã sửa xong vẫn chặn mãi, và vòng sửa
+    lại không bao giờ tới được chờ duyệt.
+    """
+    rnd = state.get("revision_count", 0)
+    return [f for f in state.get("findings", []) if f.get("round", 0) == rnd]
+
+
 def blockers(state: FleetState) -> list[Finding]:
-    return [f for f in state.get("findings", []) if f["severity"] in ("BLOCKER", "CRITICAL")]
+    return [f for f in current_findings(state) if f["severity"] in ("BLOCKER", "CRITICAL")]

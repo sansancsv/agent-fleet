@@ -140,8 +140,16 @@ class TestGate:
         assert graph.gate(s) == "revise"
 
     def test_het_luot_sua_thi_leo_thang(self):
-        s = _state(reviews=[_review("reviewer", rnd=2)], findings=[BLOCKER], revision_count=2)
+        s = _state(reviews=[_review("reviewer", rnd=2)], findings=[{**BLOCKER, "round": 2}],
+                   revision_count=2)
         assert graph.gate(s) == "escalate"
+
+    def test_muc_chan_vong_cu_da_sua_khong_con_chan(self):
+        # `findings` cộng dồn qua mọi vòng. Mục chặn của vòng 0 đã được sửa ở
+        # vòng 1 thì không được chặn mãi.
+        s = _state(reviews=[_review("reviewer", rnd=0), _review("reviewer", rnd=1)],
+                   findings=[{**BLOCKER, "round": 0}], revision_count=1)
+        assert graph.gate(s) == "approval"
 
 
 # ---------------------------------------------------------------------------
@@ -417,3 +425,48 @@ class TestDuLieuNgoai:
     def test_moi_bien_the_the_dong_deu_bi_vo_hieu(self, dong_the):
         body = graph._untrusted("requester", f"a {dong_the} b").split("\n")[1]
         assert not re.search(r"<\s*/\s*untrusted", body, re.IGNORECASE)
+
+
+# ---------------------------------------------------------------------------
+# 7. Vòng sửa lại: nhận góp ý, có giới hạn, và tới được chờ duyệt
+# ---------------------------------------------------------------------------
+class TestVongSuaLai:
+    @staticmethod
+    def _reviewer_lan_luot(*texts):
+        """Reviewer trả lần lượt từng text; hết danh sách thì lặp lại text cuối."""
+        calls = []
+
+        def reply(_prompt):
+            calls.append(1)
+            return _res("reviewer", texts[min(len(calls), len(texts)) - 1] + _status())
+        return reply
+
+    async def test_gop_y_duoc_chuyen_cho_implementer_roi_toi_cho_duyet(self, fleet):
+        fleet.replies["reviewer"] = self._reviewer_lan_luot(
+            "[BLOCKER] src/pay.py:41 | cộng tiền hai lần | gọi lại khi timeout",
+            "Không có phát hiện nào.",
+        )
+        snap = await _run()
+
+        impl = [p for role, p in fleet.calls if role == "implementer"]
+        assert len(impl) == 2
+        assert "lượt sửa lại" not in impl[0]
+        assert "lượt sửa lại" in impl[1] and "src/pay.py:41" in impl[1]
+        # Vòng 1 sạch → tới chờ duyệt; mục chặn đã sửa của vòng 0 không đếm nữa.
+        assert snap.next == ("approval",)
+        assert snap.values["revision_count"] == 1
+        payload = snap.tasks[0].interrupts[0].value
+        assert payload["blockers"] == 0 and payload["findings"] == []
+
+    async def test_het_luot_sua_thi_leo_thang_dung_max_revisions(self, fleet):
+        fleet.replies["reviewer"] = self._reviewer_lan_luot(
+            "[BLOCKER] src/pay.py:41 | cộng tiền hai lần | gọi lại khi timeout",
+        )
+        snap = await _run()
+
+        # Lượt đầu + đúng max_revisions (2) lượt sửa, rồi dừng — không tới
+        # giới hạn đệ quy của LangGraph như trước.
+        assert fleet.roles().count("implementer") == 3
+        assert snap.next == ()
+        assert snap.values["escalated"] is True and snap.values["revision_count"] == 2
+        assert "Đã sửa 2 lượt" in snap.values["summary"]
