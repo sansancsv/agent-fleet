@@ -59,7 +59,7 @@ ban, LangGraph cho quy trình dài cần lưu trạng thái và chờ người d
 | `security` | chỉ đọc + chạy, không mạng | Claude Opus | Kết quả quét không được rò ra ngoài |
 | `docs-writer` | đọc, ghi | Gemini | Ngữ cảnh dài, chi phí thấp |
 | `sre` | đọc, chạy, **không ghi repo** | Claude Sonnet | Chạm được cụm nhưng không lặng lẽ sửa code |
-| `analyst` | chỉ đọc | Gemini | Dùng chung cho mọi phòng ban |
+| `analyst` | chỉ đọc | Gemini | Dùng chung cho phòng ban `public`/`internal` — hồ sơ `confidential`/`restricted` bị chốt dataClass từ chối |
 
 **Quy tắc quan trọng nhất trong bảng này:** `reviewer` chạy trên model của một
 nhà cung cấp **khác** `implementer`. Cùng một model vừa viết vừa chấm sẽ bỏ sót
