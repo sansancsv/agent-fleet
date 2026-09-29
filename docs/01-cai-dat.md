@@ -108,6 +108,10 @@ kubectl -n fleet create configmap openclaw-configd --from-file=control-plane/con
 kubectl -n fleet create configmap mcporter-config  --from-file=capability-plane/mcporter.json
 kubectl -n fleet create configmap acpx-config      --from-file=config.json=execution-plane/config/acpx.global.json
 kubectl -n fleet create configmap fleet-skills     --from-file=distribution-plane/skills/
+# Hồ sơ phòng ban cho langgraph. `create --dry-run | apply` chứ không `create`
+# trần: chạy lại sau mỗi lần sửa profiles/ — xem "Hồ sơ phòng ban trên Kubernetes".
+kubectl -n fleet create configmap fleet-profiles   --from-file=profiles/ \
+  --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f deploy/k8s/60-mcporter.yaml
 kubectl apply -f deploy/k8s/40-openclaw-gateway.yaml
 kubectl apply -f deploy/k8s/50-agent-runner.yaml
@@ -137,6 +141,51 @@ kubectl apply -f deploy/k8s/70-langgraph.yaml
 `openclaw-gateway` giữ phiên trong SQLite trên PVC → `replicas: 1`,
 `strategy: Recreate`. Cần chịu tải cao hơn thì chạy nhiều gateway, mỗi gateway
 một tập phòng ban, không phải nhiều bản sao của cùng một gateway.
+
+### Hồ sơ phòng ban trên Kubernetes (ConfigMap `fleet-profiles`)
+`langgraph` đọc `profiles/*.yaml` từ `FLEET_PROFILES_DIR=/fleet/profiles` ở mỗi
+yêu cầu: mọi endpoint `/profiles/<tên>/...` và danh sách `approvers` khi
+`/runs/<id>/resume`. Compose bind-mount thẳng `profiles/`; trên K8s,
+`70-langgraph.yaml` mount ConfigMap `fleet-profiles` **sinh từ** `profiles/`
+bằng lệnh ở trên — nguồn sự thật vẫn là git, manifest không chứa nội dung hồ sơ.
+Thiếu ConfigMap thì pod `langgraph` kẹt ở `ContainerCreating` (cố ý không
+`optional`): lỗi lộ ngay, thay vì mọi endpoint theo hồ sơ trả 404 im lặng.
+
+**Giữ đồng bộ.** Sau mỗi thay đổi trong `profiles/` đã merge (thêm, sửa hay xoá
+hồ sơ), chạy lại đúng lệnh `fleet-profiles` ở trên, từ gốc repo tại commit đó.
+Không cần khởi động lại pod: volume mount cả thư mục (không `subPath`) nên
+kubelet tự cập nhật file sau độ trễ đồng bộ của nó (mặc định cỡ một–hai phút),
+và `server.py` đọc lại hồ sơ ở mỗi yêu cầu. Cần áp dụng ngay:
+`kubectl -n fleet rollout restart deploy/langgraph`.
+
+Kiểm cụm có lệch git không — chạy tay, hoặc định kỳ trong pipeline triển khai:
+```bash
+kubectl -n fleet create configmap fleet-profiles --from-file=profiles/ \
+  --dry-run=client -o yaml | kubectl diff -f -
+# mã thoát: 0 = khớp · 1 = lệch (in phần khác) · lớn hơn 1 = lỗi
+```
+
+**Vì sao `create --dry-run | apply` mà không `create`.** `create` chạy lần hai
+báo `AlreadyExists`. Nguy hiểm hơn: `apply` chỉ xoá những khoá mà chính nó đã
+ghi (annotation `last-applied-configuration`), và ConfigMap tạo bằng `create`
+trần không có annotation đó. Hồ sơ bị xoá khỏi git trước lần `apply` đầu tiên
+vì thế **nằm lại** trên cụm, qua mọi lần `apply` về sau — phòng ban đã bị gỡ vẫn
+gửi và duyệt được. Nếu đã lỡ tạo bằng `create` trần:
+`kubectl -n fleet delete configmap fleet-profiles`, rồi chạy lại lệnh ở trên.
+
+**Ai sửa được ConfigMap này là người quyết định ai gửi và ai duyệt**, vì
+`requesters` và `approvers` nằm trong đó. Quyền `update`/`patch` configmaps
+trong namespace `fleet` chỉ nên thuộc pipeline triển khai (repo không cấp quyền
+đó cho ServiceAccount nào). Sửa tay trên cụm là đi vòng qua review của git:
+`kubectl diff` ở trên sẽ lộ ra, và lần đồng bộ sau ghi đè.
+
+`validate.sh` bước 8e canh phần manifest: `FLEET_PROFILES_DIR` được đặt tường
+minh và được mount chỉ đọc, cả thư mục, từ một configMap không `optional` và
+không `items`.
+
+`agent-runner` KHÔNG mount ConfigMap này: `dept-request.flow.ts` đọc bản hồ sơ
+chép vào image lúc build (`Dockerfile.agent-runner`). Trên K8s, hồ sơ sửa xong
+chỉ tới flow đó sau khi build và triển khai lại image `agent-runner`.
 
 ---
 
