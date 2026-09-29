@@ -43,7 +43,7 @@ from pydantic import BaseModel, Field
 
 from . import trajectory
 from .graph import build_graph
-from .state import blockers, initial_state
+from .state import blockers, current_findings, initial_state
 
 PROFILES_DIR = Path(os.environ.get("FLEET_PROFILES_DIR", "/fleet/profiles"))
 CHECKPOINT_DSN = os.environ.get("FLEET_CHECKPOINT_DSN", "")
@@ -195,7 +195,7 @@ def _summarize(snapshot) -> dict:
         "pr_url": values.get("pr_url"),
         "summary": values.get("summary"),
         "blockers": len(blockers(values)) if values else 0,
-        "findings": (values.get("findings") or [])[:20],
+        "findings": current_findings(values)[:20] if values else [],
         "interrupt": pending[0][0].value if pending else None,
     }
 

@@ -42,9 +42,11 @@ Ranh giới rõ nghĩa là: **đổi một tầng không phải sửa ba tầng 
    • prepare  : tạo git worktree riêng                    ← xác định
    • triage   : phân loại rủi ro                          ← model, đầu ra ép về 3 nhãn
    • implement: acpx claude, quyền approve-all            ← phi xác định
+     (không hoàn tất hoặc diff rỗng → leo thang ngay)     ← xác định
    • review   : acpx codex,  quyền deny-all               ← khác nhà cung cấp
      (mỗi lượt agent = một POST /run tới dịch vụ agent-runner)
-   • gate     : hàm thuần tuý đếm mục chặn                ← xác định
+   • gate     : hàm thuần tuý: thẩm định không hoàn tất   ← xác định
+                → leo thang; còn mục chặn → sửa lại
    • approval : interrupt() — ghi trạng thái, giải phóng pod
         │
 5. Người duyệt → POST /runs/<id>/resume, `by` phải nằm trong approvers của hồ sơ

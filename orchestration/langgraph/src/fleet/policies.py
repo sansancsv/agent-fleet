@@ -11,9 +11,10 @@ from __future__ import annotations
 import re
 from typing import Literal, get_args
 
-from .state import Finding, Risk
+from .state import Finding, Outcome, Risk
 
 _RISK_VALUES = set(get_args(Risk))
+_OUTCOME_VALUES = set(get_args(Outcome))
 
 # [BLOCKER] src/api/user.ts:142 | mô tả | kịch bản
 _FINDING_RE = re.compile(
@@ -57,6 +58,46 @@ def parse_findings(role: str, text: str) -> list[Finding]:
             continue  # không có vị trí cụ thể → không đủ tư cách chặn
         findings.append({"role": role, "severity": sev, "location": loc, "detail": detail[:500]})
     return findings
+
+
+# ---------------------------------------------------------------------------
+# Một lượt agent có HOÀN TẤT không — đọc tín hiệu có kiểu, không đoán văn bản
+# ---------------------------------------------------------------------------
+def turn_problem(exit_code: int, status: dict[str, str]) -> str:
+    """Lý do một lượt agent KHÔNG được tính là hoàn tất; chuỗi rỗng = hoàn tất.
+
+    Hoàn tất = thoát mã 0 + có khối fleet-status + `outcome` là đúng một nhãn
+    hợp lệ và không phải blocked/rejected. Chỉ đọc tín hiệu có kiểu (mã thoát,
+    khối trạng thái), không đoán nội dung phản hồi.
+
+    Nhãn không nhận dạng được — kể cả khi agent chép nguyên dòng mẫu
+    "success | partial | blocked | rejected" — bị coi là CHƯA hoàn tất. Không
+    chắc thì nghiêng về mức chặt hơn, cùng hướng với `risk_from_text`.
+    """
+    if exit_code != 0:
+        return f"thoát mã {exit_code}"
+    if not status:
+        return "thiếu khối fleet-status"
+    if "outcome" not in status:
+        return "khối fleet-status thiếu outcome"
+    outcome = status["outcome"].strip().strip("`'\".").lower()
+    if outcome not in _OUTCOME_VALUES:
+        return f"outcome không hợp lệ: {outcome[:40]!r}"
+    if outcome in ("blocked", "rejected"):
+        return f"outcome: {outcome}"
+    return ""
+
+
+def required_reviewers(risk: str | None) -> list[str]:
+    """Vai trò thẩm định BẮT BUỘC theo mức rủi ro.
+
+    Một nguồn duy nhất cho cả `cross_review` (gọi ai) lẫn `gate` (ai phải hoàn
+    tất): hai danh sách lệch nhau là cách một vai trò bị lặng lẽ bỏ qua. Mức rủi
+    ro thiếu hoặc lạ → coi như `risky`, cùng hướng với `risk_from_text`.
+    """
+    if risk in ("trivial", "standard"):
+        return ["reviewer"]
+    return ["reviewer", "security"]
 
 
 # ---------------------------------------------------------------------------
