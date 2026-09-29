@@ -128,7 +128,7 @@ def approval(task_id: str, *, by: str, approved: bool, profile: str = "") -> Non
 def permission_denied(task_id: str, *, profile: str, by: str, reason: str) -> None:
     """Một yêu cầu bị server.py chặn TRƯỚC KHI chạm graph hay agent nào.
 
-    Hai nơi gọi:
+    Ba nơi gọi:
       * /runs/<id>/resume — `by` không nằm trong approvers. `human_approval`
         trong graph.py chỉ chạy sau khi server.py đã cho `by` qua kiểm, nên
         một yêu cầu bị 403 không bao giờ tới đó. Hàm này tách khỏi
@@ -137,6 +137,9 @@ def permission_denied(task_id: str, *, profile: str, by: str, reason: str) -> No
       * /profiles/<tên>/run — người gửi không thuộc requesters, hoặc chốt
         dataClass từ chối backend (`reason` = "backend-not-allowed:<backend>");
         `by` là người gửi yêu cầu.
+      * /runs/wait — chốt dataClass từ chối một hay nhiều backend của đồ thị
+        (`reason` = "backend-not-allowed:<backend>[,<backend>...]"), trước khi
+        có thread; `task_id` là thread_id, `by` là `requester` trong input.
     Không gọi hàm này thì các lượt bị từ chối không để lại dấu vết bền nào.
     """
     _append({"ts": _now(), "event": "permission.denied", "task_id": task_id,

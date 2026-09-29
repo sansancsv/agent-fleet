@@ -10,8 +10,10 @@ Ba thứ được kiểm ở đây:
      `POST /profiles/<tên>/run`.
   3. Ba chốt bảo vệ: Bearer token trên mọi endpoint trừ /ok; người duyệt ở
      `/resume` phải nằm trong `approvers` của hồ sơ; và chốt dataClass — lượt
-     agent phòng ban chỉ chạy khi backend của nó được mức dữ liệu của hồ sơ
-     cho phép. Không có chốt cuối, dữ liệu `restricted` từng đi thẳng tới Gemini.
+     agent phòng ban (`/profiles/<tên>/run`) và đồ thị kỹ thuật (`/runs/wait`)
+     chỉ chạy khi backend của chúng được mức dữ liệu của hồ sơ cho phép. Không
+     có chốt này, dữ liệu `restricted` từng đi thẳng tới Gemini, và ai giữ
+     token gọi thẳng /runs/wait là chạy được Claude/Codex trên dữ liệu đó.
 
 Vòng chờ-người-duyệt được kiểm bằng một đồ thị nhỏ thay cho đồ thị thật, và
 agent-runner được thay bằng bản giả ghi lại lượt gọi — test không cần git,
@@ -105,10 +107,10 @@ def _dept(client, profile: str, *, request="Tóm tắt chi phí quý 3", request
     )
 
 
-def _start(client, task_id: str, profile: str = "demo"):
+def _start(client, task_id: str, profile: str = "demo", **extra):
     return client.post(
         "/runs/wait",
-        json={"input": {"task_id": task_id, "title": "x", "profile": profile}},
+        json={"input": {"task_id": task_id, "title": "x", "profile": profile, **extra}},
         headers=AUTH,
     )
 
@@ -210,10 +212,16 @@ class TestApprover:
         r = client.post("/runs/A-4/resume", json={"approved": True, "by": "sep@x.vn"}, headers=AUTH)
         assert r.status_code == 409
 
-    def test_ho_so_khong_ton_tai_thi_khong_duyet_duoc(self, client):
-        _start(client, "A-5", profile="khong-co")
+    def test_ho_so_khong_ton_tai_thi_khong_duyet_duoc(self, client, tmp_path):
+        # /runs/wait không còn tạo thread với hồ sơ không tồn tại (404, xem
+        # TestChotDoThi), nên xoá hồ sơ SAU khi thread đã tới điểm chờ duyệt.
+        _ho_so(tmp_path, "tam", "internal")
+        assert _start(client, "A-5", profile="tam").json()["status"] == "interrupted"
+        (tmp_path / "tam.yaml").unlink()
         r = client.post("/runs/A-5/resume", json={"approved": True, "by": "sep@x.vn"}, headers=AUTH)
         assert r.status_code == 404
+        # Hồ sơ biến mất thì không ai duyệt được, và thread vẫn nằm chờ.
+        assert client.get("/runs/A-5", headers=AUTH).json()["status"] == "interrupted"
 
 
 class TestDeptGate:
@@ -325,3 +333,116 @@ class TestDeptGate:
         audit = [json.loads(line) for line in capsys.readouterr().out.splitlines()
                  if '"policy.decision"' in line]
         assert audit and audit[-1]["allowed"] is True and audit[-1]["backend"] == "gemini"
+
+
+class TestChotDoThi:
+    """Chốt dataClass của /runs/wait: đồ thị kỹ thuật chạy trên Claude và Codex.
+
+    Theo ROLE_BACKENDS hôm nay, orchestrator/architect/implementer chạy Claude,
+    reviewer/security chạy Codex. n8n luôn gửi `engineering`, nhưng trước khi có
+    chốt này, ai giữ LANGGRAPH_TOKEN gọi thẳng /runs/wait với finance/legal
+    (restricted) hay support (confidential) là đưa được dữ liệu đó tới cả hai.
+    """
+
+    @pytest.mark.parametrize(
+        ("data_class", "bi_chan"),
+        [
+            ("restricted", {"claude": "orchestrator, architect, implementer",
+                            "codex": "reviewer, security"}),
+            ("confidential", {"codex": "reviewer, security"}),
+        ],
+    )
+    def test_backend_khong_duoc_phep_thi_403_va_khong_co_thread(
+        self, client, tmp_path, data_class, bi_chan
+    ):
+        _ho_so(tmp_path, "mat", data_class)
+        r = _start(client, "W-1", profile="mat")
+        assert r.status_code == 403
+        # Đồ thị chưa hề được gọi: không có thread để đọc lại, duyệt hay chạy tiếp.
+        assert client.get("/runs/W-1", headers=AUTH).status_code == 404
+        detail = r.json()["detail"]
+        for backend in ("claude", "codex"):
+            ly_do = f"Backend '{backend}' không được phép xử lý dữ liệu mức '{data_class}'"
+            if backend in bi_chan:
+                assert f"{bi_chan[backend]} → {ly_do}" in detail
+            else:
+                assert ly_do not in detail
+
+    @pytest.mark.parametrize("data_class", ["internal", "public"])
+    def test_moi_backend_duoc_phep_thi_chay_binh_thuong(self, client, tmp_path, data_class):
+        _ho_so(tmp_path, "mo", data_class)
+        r = _start(client, "W-2", profile="mo")
+        assert r.status_code == 200 and r.json()["status"] == "interrupted"
+        assert client.get("/runs/W-2", headers=AUTH).json()["status"] == "interrupted"
+
+    @pytest.mark.parametrize("data_class", [None, "bi-mat", "Internal"])
+    def test_dataclass_thieu_hoac_la_thi_tu_choi(self, client, tmp_path, data_class):
+        # Fail closed: hồ sơ quên khai dataClass không được coi là "không ràng buộc".
+        _ho_so(tmp_path, "mo-ho", data_class)
+        assert _start(client, "W-3", profile="mo-ho").status_code == 403
+        assert client.get("/runs/W-3", headers=AUTH).status_code == 404
+
+    def test_ho_so_khong_ton_tai_thi_404_va_khong_co_thread(self, client):
+        assert _start(client, "W-4", profile="khong-co").status_code == 404
+        assert client.get("/runs/W-4", headers=AUTH).status_code == 404
+
+    def test_bo_trong_profile_thi_kiem_ho_so_engineering(self, client, tmp_path):
+        # Mặc định như initial_state, và bỏ trống không phải đường vòng: chốt kiểm
+        # đúng hồ sơ mà state mang theo — cũng là hồ sơ /resume tra approvers.
+        body = {"input": {"task_id": "W-5", "title": "x"}}
+        assert client.post("/runs/wait", json=body, headers=AUTH).status_code == 404
+        _ho_so(tmp_path, "engineering", "restricted")
+        assert client.post("/runs/wait", json=body, headers=AUTH).status_code == 403
+        _ho_so(tmp_path, "engineering", "internal")
+        assert client.post("/runs/wait", json=body, headers=AUTH).json()["status"] == "interrupted"
+        r = client.post("/runs/W-5/resume", json={"approved": True, "by": "sep@x.vn"}, headers=AUTH)
+        assert r.json()["outcome"] == "success"
+
+    @pytest.mark.parametrize("profile", [None, "", 7, ["demo"], "../demo"])
+    def test_profile_khong_phai_ten_ho_so_thi_400(self, client, profile):
+        assert _start(client, "W-6", profile=profile).status_code == 400
+        assert client.get("/runs/W-6", headers=AUTH).status_code == 404
+
+    def test_quyet_dinh_theo_backend_that_cua_vai_tro(self, client, tmp_path, monkeypatch):
+        # Chốt tra ROLE_BACKENDS, không cấm cứng Codex: vai trò thẩm định chạy
+        # trên backend được phép thì hồ sơ confidential đi qua được.
+        for role in ("reviewer", "security"):
+            monkeypatch.setitem(server.ROLE_BACKENDS, role, ("claude", "deny-all"))
+        _ho_so(tmp_path, "mat", "confidential")
+        assert _start(client, "W-7", profile="mat").status_code == 200
+
+    @pytest.mark.parametrize("role", server.GRAPH_ROLES)
+    def test_mot_vai_tro_bi_cam_la_tu_choi_ca_luot(self, client, tmp_path, monkeypatch, role):
+        # Kể cả vai trò chỉ chạy trên nhánh risky: chốt không biết trước triage
+        # sẽ phán gì, nên kiểm TỪNG vai trò trong GRAPH_ROLES.
+        for other in server.GRAPH_ROLES:
+            monkeypatch.setitem(server.ROLE_BACKENDS, other, ("claude", "deny-all"))
+        monkeypatch.setitem(server.ROLE_BACKENDS, role, ("gemini", "deny-all"))
+        _ho_so(tmp_path, "mat", "confidential")
+        r = _start(client, "W-8", profile="mat")
+        assert r.status_code == 403 and f"{role} → Backend 'gemini'" in r.json()["detail"]
+        assert client.get("/runs/W-8", headers=AUTH).status_code == 404
+
+    def test_tu_choi_de_lai_dau_vet_ben(self, client, tmp_path, capsys):
+        _ho_so(tmp_path, "tai-chinh", "restricted")
+        _start(client, "REQ-9", profile="tai-chinh", requester="cfo@x.vn")
+
+        audit = [json.loads(line) for line in capsys.readouterr().out.splitlines()
+                 if '"policy.decision"' in line]
+        assert audit and audit[-1]["allowed"] is False and audit[-1]["thread_id"] == "REQ-9"
+        assert audit[-1]["data_class"] == "restricted"
+        assert audit[-1]["denied"] == ["claude", "codex"]
+
+        denied = [e for e in trajectory.read_all(tmp_path / "vet")
+                  if e.get("event") == "permission.denied"]
+        assert denied and denied[-1]["task_id"] == "REQ-9"
+        assert denied[-1]["by"] == "cfo@x.vn" and denied[-1]["profile"] == "tai-chinh"
+        assert denied[-1]["reason"] == "backend-not-allowed:claude,codex"
+
+    def test_cho_qua_cung_ghi_audit(self, client, capsys):
+        _start(client, "W-9", requester="an@x.vn")
+        audit = [json.loads(line) for line in capsys.readouterr().out.splitlines()
+                 if '"policy.decision"' in line]
+        assert audit and audit[-1]["allowed"] is True and audit[-1]["profile"] == "demo"
+        assert audit[-1]["backends"] == ["claude", "codex"]
+        assert audit[-1]["requester"] == "an@x.vn"

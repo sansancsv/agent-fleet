@@ -13,7 +13,7 @@ Vì sao tự viết server thay vì dùng `langgraph up` / LangGraph Server:
      `GET /profiles/<tên>/authorize`. Đó là API của fleet này, không phải API
      của LangGraph Server. Tự viết thì hai bên khớp nhau theo đúng nghĩa đen.
 
-Ba chốt bảo vệ của API này (cả ba đều fail closed):
+Bốn chốt bảo vệ của API này (cả bốn đều fail closed):
 
   * Mọi endpoint trừ /ok đòi `Authorization: Bearer $LANGGRAPH_TOKEN`. Thiếu
     biến môi trường thì API trả 503 cho mọi yêu cầu — không âm thầm mở.
@@ -25,6 +25,9 @@ Ba chốt bảo vệ của API này (cả ba đều fail closed):
     nằm trong danh sách mà mức nhạy cảm dữ liệu của hồ sơ cho phép
     (`policies.assert_backend_allowed`); nếu không → 403, và KHÔNG có lượt
     agent nào chạy. Không bao giờ "chạy tạm" trên một backend khác.
+  * `/runs/wait` là cùng chốt đó cho đồ thị kỹ thuật: backend của MỌI vai trò
+    mà đồ thị có thể gọi (`graph.GRAPH_ROLES`) phải được dataClass của hồ sơ
+    cho phép. Kiểm TRƯỚC `graph.ainvoke` — bị từ chối thì không có thread nào.
 
 Chạy:  uvicorn fleet.server:app --host 0.0.0.0 --port 8000
 =============================================================================
@@ -47,7 +50,7 @@ from pydantic import BaseModel, Field
 
 from . import trajectory
 from .acpx_client import ROLE_BACKENDS, AcpxError, run_role
-from .graph import REPO_ROOT, build_graph
+from .graph import GRAPH_ROLES, REPO_ROOT, build_graph
 from .policies import assert_backend_allowed
 from .state import blockers, initial_state
 
@@ -307,12 +310,59 @@ async def run_wait(req: RunRequest) -> dict:
 
     n8n gọi endpoint này. Nếu trả `status: interrupted`, quy trình đang nằm
     trong PostgreSQL chờ người — gọi /runs/<thread_id>/resume để chạy tiếp.
+
+    Chốt dataClass đứng TRƯỚC `graph.ainvoke`, tức trước khi có thread nào:
+      1. Hồ sơ là `profile` của chính state sắp tạo — mặc định `engineering`
+         như `initial_state`, và cũng là hồ sơ mà /resume tra approvers. Không
+         có hồ sơ đó → 404: bỏ trống `profile` hay gõ sai tên không phải đường
+         vòng qua chốt.
+      2. Backend của MỌI vai trò trong GRAPH_ROLES phải được dataClass của hồ
+         sơ cho phép (403 nếu không; dataClass thiếu hoặc lạ cũng bị từ chối).
+         Kiểm tất cả, không chỉ vai trò chắc chắn chạy: architect và security
+         chỉ chạy khi triage — một lượt model — phán `risky`, tức là khi dữ
+         liệu đã tới model rồi. Không có đường "chạy tạm" phần được phép.
+      3. Cho qua hay từ chối đều ghi audit `policy.decision`; từ chối ghi thêm
+         `permission.denied` vào vết chạy (bền qua restart), như dept_run.
     """
     graph = _state["app"]
     tid = _thread_id(req)
     cfg = {"configurable": {"thread_id": tid, **req.config.configurable}}
 
     payload = initial_state(**req.input)
+    name = payload.get("profile")
+    if not isinstance(name, str) or not name:
+        raise HTTPException(400, "`profile` phải là tên một hồ sơ phòng ban (chuỗi khác rỗng)")
+    data_class = str(_load_profile(name).get("dataClass") or "")
+    requester = str(payload.get("requester") or "")
+
+    reasons: dict[str, list[str]] = {}       # lý do từ chối → các vai trò dính lý do đó
+    denied: set[str] = set()
+    for role in GRAPH_ROLES:
+        backend = ROLE_BACKENDS[role][0]
+        try:
+            assert_backend_allowed(backend, data_class)
+        except PermissionError as exc:
+            denied.add(backend)
+            reasons.setdefault(str(exc), []).append(role)
+
+    decision = {"thread_id": tid, "profile": name, "requester": requester,
+                "data_class": data_class,
+                "backends": sorted({ROLE_BACKENDS[r][0] for r in GRAPH_ROLES})}
+    if denied:
+        _audit("policy.decision", **decision, allowed=False, reason="backend-not-allowed",
+               denied=sorted(denied))
+        trajectory.permission_denied(tid, profile=name, by=requester,
+                                      reason="backend-not-allowed:" + ",".join(sorted(denied)))
+        why = "; ".join(f"{', '.join(roles)} → {msg}" for msg, roles in reasons.items())
+        raise HTTPException(
+            403,
+            f"Hồ sơ '{name}' không chạy được đồ thị kỹ thuật: {why}. Nhánh nào chạy chỉ biết "
+            "sau lượt phân loại rủi ro, nên chốt kiểm mọi vai trò đồ thị có thể gọi và từ chối "
+            "cả lượt — không chạy phần được phép, không đổi sang backend khác (xem "
+            "docs/03-mo-rong-phong-ban.md).",
+        )
+    _audit("policy.decision", **decision, allowed=True)
+
     await graph.ainvoke(payload, cfg)
     snap = await graph.aget_state(cfg)
     return {"thread_id": tid, **_summarize(snap)}
