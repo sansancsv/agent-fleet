@@ -11,9 +11,21 @@ dataSources:
   - "Kho dữ liệu: lịch sử ticket (đã ẩn danh)"
 
 agents:
-  classifier: gemini
+  # dataClass=confidential → chỉ claude và local-llm (policy/model-routing.yaml,
+  # validate.sh bước 8a). Claude soạn, model tự host thẩm định — vẫn khác nhà
+  # cung cấp (bước 8). Phân loại cũng chạy tự host: rẻ, và dữ liệu khách hàng
+  # chỉ rời hạ tầng công ty ở đúng một bước (soạn thảo).
+  #
+  # ĐÁNH ĐỔI — local-llm CHƯA DỰNG: acpx.global.json trỏ backend này tới
+  # /fleet/bin/local-acp-bridge.mjs, file chưa có trong repo. Cho tới khi có,
+  # hồ sơ này KHÔNG chạy được: flow dept-request dừng ngay ở bước phân loại,
+  # trước khi tiêu token Claude cho một bản nháp không ai thẩm định được. Đó là
+  # chủ đích. Các lựa chọn còn lại đều tệ hơn: Gemini vi phạm dataClass;
+  # claude+claude là tự chấm bài mình; hạ xuống internal là khai sai độ nhạy
+  # cảm của dữ liệu khách hàng. Xem docs/03-mo-rong-phong-ban.md.
+  classifier: local-llm
   drafter: claude
-  reviewer: gemini
+  reviewer: local-llm
 
 categories: [loi-ky-thuat, thanh-toan, huong-dan-su-dung, yeu-cau-tinh-nang, khieu-nai]
 
