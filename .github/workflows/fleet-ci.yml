@@ -5,7 +5,8 @@
 name: Fleet CI
 
 on:
-  push: { branches: [main] }
+  # Nhánh mặc định của repo là `master`; giữ `main` phòng khi đổi tên nhánh.
+  push: { branches: [main, master] }
   pull_request:
 
 permissions:
@@ -27,7 +28,9 @@ jobs:
           sudo curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq
           sudo chmod +x /usr/local/bin/yq
       - name: Kiểm chứng toàn bộ cấu hình
-        run: ./scripts/validate.sh
+        # Gọi qua bash: bit +x mất khi commit từ Windows/WSL (/mnt/c), và CI
+        # không được đỏ vì lý do không liên quan tới cấu hình.
+        run: bash scripts/validate.sh
 
   policy:
     name: Test chính sách OPA
@@ -66,6 +69,10 @@ jobs:
           context: .
           file: deploy/docker/Dockerfile.agent-runner
           push: false
+          # Nạp ảnh vào Docker daemon dưới đúng tên bước quét dùng. Thiếu hai
+          # dòng này, ảnh chỉ nằm trong cache của buildx và trivy không thấy.
+          load: true
+          tags: agent-runner:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Quét lỗ hổng ảnh
@@ -79,6 +86,11 @@ jobs:
   secrets:
     name: Quét secret
     runs-on: ubuntu-latest
+    # Trên PR, gitleaks-action gọi API liệt kê commit của PR; repo private thì
+    # token cần quyền đọc pull request, `contents: read` thôi là không đủ.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
