@@ -34,7 +34,9 @@ target-version = "py312"
 # Ghim tập luật tường minh. `ruff>=0.7` không có cận trên, và ruff 0.16 đã mở
 # rộng tập luật mặc định (E4/E7/E9/F → hơn 400 luật): CI đỏ dù code không đổi.
 # Muốn bật thêm luật thì thêm vào đây, có chủ đích.
-select = ["E4", "E7", "E9", "F"]
+# ASYNC: cấm lời gọi chặn (subprocess.run, I/O đĩa...) ngay trong hàm async —
+# server.py chạy mọi run trên MỘT event loop, một lời gọi chặn treo cả server.
+select = ["E4", "E7", "E9", "F", "ASYNC"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
