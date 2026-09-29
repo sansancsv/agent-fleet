@@ -51,6 +51,11 @@ spec:
               valueFrom: { secretKeyRef: { name: fleet-model-keys, key: OPENAI_API_KEY } }
             - name: ACPX_AUTH_GEMINI_API_KEY
               valueFrom: { secretKeyRef: { name: fleet-model-keys, key: GEMINI_API_KEY } }
+            # codex-acp 2.x tự đăng nhập bằng OPENAI_API_KEY (acpx đẩy ra từ
+            # ACPX_AUTH_OPENAI_API_KEY) khi phiên cần; thiếu biến này mọi lượt
+            # codex chết ở session/new. Không phải bí mật — xem //authPolicy
+            # trong acpx.global.json.
+            - { name: DEFAULT_AUTH_REQUEST, value: '{"methodId":"api-key"}' }
           envFrom:
             - secretRef: { name: fleet-service-tokens }
           volumeMounts:

@@ -12,7 +12,7 @@
   "//nonInteractive2": "an toàn hơn 'deny' (âm thầm bỏ qua) vì buộc quy trình phải xử lý.",
   "nonInteractivePermissions": "fail",
 
-  "//authPolicy": "PHẢI là 'skip', không phải 'fail'. @zed-industries/claude-code-acp chỉ quảng bá auth method 'claude-login' và authenticate() của nó chưa cài đặt (luôn throw) — 'fail' sẽ làm backend claude (5/9 vai trò) không bao giờ chạy được dù credential đúng. 'skip' bỏ bước tiền kiểm; lỗi credential thật vẫn hiện rõ ở bước prompt qua thông báo lỗi của nhà cung cấp, chỉ trễ hơn.",
+  "//authPolicy": "PHẢI là 'skip', không phải 'fail'. acpx chỉ gọi authenticate khi có biến ACPX_AUTH_<METHOD_ID> khớp một auth method agent quảng bá; ngoài ra MỌI ACPX_AUTH_<X> được đẩy thành biến <X> cho tiến trình agent — khoá model thật sự đi đường này (đối chiếu acpx 0.19.3). claude-agent-acp (đối chiếu 0.84.0) không quảng bá method nào với client không khai terminal-auth như acpx, nên không có bước authenticate. codex-acp (đối chiếu 2.0.0) quảng bá 'api-key' và 'chat-gpt', tức acpx đòi ACPX_AUTH_API_KEY — tên chung mà fleet CỐ Ý không đặt, vì run-role.sh/provider_env() chỉ thu hẹp ACPX_AUTH_<NHÀ-CUNG-CẤP>_API_KEY; 'fail' sẽ chặn mọi lượt codex. Codex tự đăng nhập bằng OPENAI_API_KEY nhờ DEFAULT_AUTH_REQUEST={\"methodId\":\"api-key\"} trong env của agent-runner (docker-compose.yml, deploy/k8s/50-agent-runner.yaml; orchestration/langgraph/.env.example khi chạy acpx tại chỗ) — thiếu nó, session/new trả \"Authentication required\". Lỗi credential thật vẫn hiện rõ ở session/new hoặc prompt qua thông báo lỗi của nhà cung cấp.",
   "authPolicy": "skip",
 
   "//format": "json = NDJSON các thông điệp ACP thô, để n8n/LangGraph phân tích.",
@@ -28,10 +28,11 @@
   "//agentsWarning": "KHÔNG đặt khoá chú thích \"//...\" bên trong `agents` — acpx (đối chiếu 0.13.2) validate MỌI khoá ở đây như tên agent thật và đòi { command | argv }; khoá chú thích làm cả CLI chết ngay từ lệnh đầu tiên: Invalid config agents.// ... expected object with command. Đây là lỗi khác với mcporter.json, nơi khoá // ở mcpServers CON được bỏ qua.",
   "agents": {
     "claude": {
-      "argv": ["claude-code-acp"]
+      "//": "claude-agent-acp (đối chiếu 0.84.0) chạy binary Claude Code native trong @anthropic-ai/claude-agent-sdk của chính nó, không dùng `claude` toàn cục; CLAUDE_CODE_EXECUTABLE đổi được binary đó.",
+      "argv": ["claude-agent-acp"]
     },
     "codex": {
-      "//": "codex-acp (đối chiếu 0.16.0) chỉ nhận -c key=value hoặc -h. Không có --mode/--profile — đặt cờ đó khiến binary thoát mã 2 trước cả bước initialize (AGENT_STARTUP_FAILED).",
+      "//": "codex-acp (đối chiếu 2.0.0, gói Node) KHÔNG phân tích cờ: ngoài --version và lệnh con login/cli, mọi đối số bị bỏ qua lặng lẽ (bản Rust 0.16 thì thoát mã 2), còn `codex-acp --help` khởi động server rồi treo chờ stdin. Cấu hình codex đi qua biến môi trường (CODEX_CONFIG, INITIAL_AGENT_MODE, MODEL_PROVIDER — xem README của gói), không qua argv. Đăng nhập: xem //authPolicy.",
       "argv": ["codex-acp"]
     },
     "gemini": {
@@ -41,7 +42,7 @@
       "argv": ["node", "/fleet/bin/local-acp-bridge.mjs", "--base-url", "${LOCAL_LLM_BASE_URL}"]
     },
     "ci-reviewer": {
-      "//": "Hồ sơ CI 'khoá chặt hơn' còn là dự định — codex-acp không có cờ --profile; muốn siết thật thì dùng '-c key=value' (xem codex-acp --help) và điền đúng khoá cấu hình đã kiểm chứng.",
+      "//": "Hồ sơ CI 'khoá chặt hơn' còn là dự định. codex-acp 2.x chỉ nhận cấu hình qua biến môi trường, mà acpx không có khoá env theo agent — muốn siết thật thì bọc argv, ví dụ [\"env\", \"INITIAL_AGENT_MODE=read-only\", \"codex-acp\"], và kiểm chứng bằng phiên thật trước khi dùng.",
       "argv": ["codex-acp"]
     }
   },
