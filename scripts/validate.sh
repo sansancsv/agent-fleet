@@ -174,6 +174,21 @@ print(a.get('drafter',''), a.get('reviewer',''), d.get('dataClass',''))
   fi
 done
 
+# --- 8a. NHẤT QUÁN: mức nhạy cảm dữ liệu quyết định backend model -----------
+# Nguồn sự thật là policy/model-routing.yaml. agents.* của mọi hồ sơ phải nằm
+# trong allowedBackends của dataClass tương ứng; MODEL_POLICY (bảng mà chốt lúc
+# chạy trong server.py tra) và fleet.rego phải khớp nguồn sự thật; backend của
+# từng vai trò trong ROLE_BACKENDS phải trùng run-role.sh — nếu không, chốt kiểm
+# một backend trong khi agent-runner chạy backend khác. Trước bước này,
+# support.yaml (confidential) khai Gemini mà script vẫn xanh.
+echo; echo "8a) Mức nhạy cảm dữ liệu ↔ backend model"
+if OUT=$(python3 scripts/check-model-policy.py 2>&1); then
+  pass "agents.* nằm trong allowedBackends; MODEL_POLICY, fleet.rego, run-role.sh khớp model-routing.yaml ($OUT)"
+else
+  fail "lệch chính sách dataClass (nguồn sự thật: policy/model-routing.yaml):"
+  echo "$OUT"
+fi
+
 # --- 8b. mcporter: đối chiếu với SCHEMA THẬT của bản đã cài -----------------
 # Đây là phép kiểm tra đắt giá nhất trong script: nó bắt đúng loại lỗi chỉ lộ ra
 # lúc container khởi động (khoá chú thích trong mcpServers, lifecycle thiếu
