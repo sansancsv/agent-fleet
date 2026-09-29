@@ -23,6 +23,11 @@ spec:
             - name: FLEET_CHECKPOINT_DSN
               valueFrom: { secretKeyRef: { name: fleet-db, key: checkpointDsn } }
             - { name: FLEET_REPO_ROOT, value: /srv/repos }
+            # Hồ sơ phòng ban. server.py đọc ở MỖI yêu cầu: mọi endpoint
+            # /profiles/<tên>/..., và danh sách approvers khi /runs/<id>/resume.
+            # Thiếu thư mục này thì các endpoint đó trả 404 — an toàn nhưng fleet
+            # không dùng được. Đặt tường minh như docker-compose.yml.
+            - { name: FLEET_PROFILES_DIR, value: /fleet/profiles }
             - { name: MCPORTER_BRIDGE_URL, value: "http://mcporter:7420/mcp" }
             # Mọi lượt agent đi qua dịch vụ agent-runner (POST /run).
             - { name: AGENT_RUNNER_URL, value: "http://agent-runner:8787" }
@@ -38,6 +43,9 @@ spec:
           volumeMounts:
             - { name: repos, mountPath: /srv/repos }
             - { name: memory, mountPath: /srv/fleet-memory }
+            # Cả thư mục, KHÔNG subPath: chỉ khi mount nguyên volume thì kubelet
+            # mới cập nhật file khi ConfigMap đổi — sửa hồ sơ không cần restart pod.
+            - { name: profiles, mountPath: /fleet/profiles, readOnly: true }
           readinessProbe:
             httpGet: { path: /ok, port: http }
             periodSeconds: 10
@@ -47,6 +55,12 @@ spec:
       volumes:
         - { name: repos, persistentVolumeClaim: { claimName: fleet-repos } }
         - { name: memory, persistentVolumeClaim: { claimName: fleet-memory } }
+        # SINH từ profiles/ trong git, không chép tay nội dung hồ sơ vào đây.
+        # Lệnh tạo và cách giữ đồng bộ: docs/01-cai-dat.md §B.
+        # Cố ý KHÔNG `optional: true`: thiếu ConfigMap thì pod kẹt ở
+        # ContainerCreating (lỗi lộ ngay trong `kubectl describe pod`), thay vì
+        # chạy với thư mục rỗng và trả 404 im lặng. validate.sh bước 8e canh.
+        - { name: profiles, configMap: { name: fleet-profiles } }
 ---
 apiVersion: v1
 kind: Service

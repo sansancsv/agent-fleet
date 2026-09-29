@@ -350,6 +350,21 @@ sys.exit(1 if bad else 0)
 PYK8S
 if [[ $? -eq 0 ]]; then pass "tham chiếu secret/configMap và NetworkPolicy đầy đủ"; else FAIL=1; fi
 
+# --- 8e. K8s: langgraph phải đọc được hồ sơ phòng ban ----------------------
+# server.py đọc profiles/*.yaml từ FLEET_PROFILES_DIR ở MỖI yêu cầu. Compose
+# bind-mount profiles/; K8s mount ConfigMap `fleet-profiles` SINH TỪ profiles/
+# (lệnh ở docs/01-cai-dat.md §B), không chép tay vào manifest. Thiếu mount thì
+# mọi endpoint theo hồ sơ trả 404 mà không gì báo lỗi lúc apply. Chi tiết và
+# lý do từng điều kiện: scripts/check-k8s-profiles.py.
+# Gọi trong `if` (không `python3 ...; if [[ $? ...`): dưới `set -e`, lệnh hỏng
+# nằm ngoài `if` làm script thoát ngay — không in ✗, bỏ qua các bước sau.
+echo; echo "8e) Kubernetes — langgraph đọc được hồ sơ phòng ban"
+if OUT=$(python3 scripts/check-k8s-profiles.py deploy/k8s 2>&1); then
+  pass "langgraph: $OUT"
+else
+  fail "langgraph trên K8s KHÔNG đọc được hồ sơ phòng ban:"; echo "$OUT"
+fi
+
 # --- 9. Không có secret bị lộ trong git -------------------------------------
 echo; echo "9) Quét secret bị commit"
 if grep -rInE '(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{30,}|xox[bap]-[0-9]{10,})' \

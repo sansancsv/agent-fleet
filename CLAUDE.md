@@ -160,6 +160,7 @@ Phần lớn được `scripts/validate.sh` và `scripts/check-oc-placeholders.p
 - `mcporter serve` **không có endpoint HTTP nào**; probe phải dùng `tcpSocket`. `httpGet /healthz` làm Deployment không bao giờ Ready mà log vẫn sạch.
 - Ảnh `mcporter` tách riêng khỏi `agent-runner` (`Dockerfile.mcporter`): pod giữ credential MCP không được chứa sẵn acpx/gh/git/run-role.sh — lộ credential MCP không đồng nghĩa lộ quyền chạy code.
 - Namespace có hai đường ra Internet (mcporter + gateway cho Slack Socket Mode), cộng một rule 443 tạm thời cho agent-runner cho tới khi có `llm-egress-gateway`.
+- Hồ sơ phòng ban vào `langgraph` qua ConfigMap `fleet-profiles` **sinh từ** `profiles/` (`kubectl create configmap … --dry-run=client -o yaml | kubectl apply -f -`, `docs/01-cai-dat.md` §B), không chép tay vào manifest. Mount cả thư mục tại `FLEET_PROFILES_DIR`, chỉ đọc, không `subPath`/`items`/`optional`: thiếu mount thì mọi endpoint theo hồ sơ trả 404 trong khi pod vẫn Ready (`validate.sh` bước 8e canh). Đừng tạo bằng `create` trần: thiếu annotation `last-applied-configuration`, nên hồ sơ gỡ khỏi git trước lần `apply` đầu tiên nằm lại trên cụm mãi.
 
 ## Lưu ý môi trường
 
@@ -170,7 +171,7 @@ Phần lớn được `scripts/validate.sh` và `scripts/check-oc-placeholders.p
 
 ## Roadmap
 
-- **K8s**: manifest ở `deploy/k8s/` chưa apply lên cụm thật — cần kiểm chứng NetworkPolicy hai chiều (mcporter, langgraph) trước khi coi là production-ready.
+- **K8s**: manifest ở `deploy/k8s/` chưa apply lên cụm thật — cần kiểm chứng NetworkPolicy hai chiều (mcporter, langgraph) trước khi coi là production-ready. Hồ sơ phòng ban đã vào `langgraph` qua ConfigMap `fleet-profiles` (mount chỉ đọc tại `FLEET_PROFILES_DIR`), nhưng ConfigMap sinh bằng lệnh kubectl chạy tay, không nằm trong `deploy/k8s/`, nên không tự theo git: phải chạy lại lệnh đồng bộ sau mỗi lần sửa `profiles/`, và `kubectl diff` là cách phát hiện cụm lệch git (`docs/01-cai-dat.md` §B). `agent-runner` vẫn đọc bản hồ sơ chép vào image (`dept-request.flow.ts`). Pod `langgraph` còn bị Pod Security `restricted` của namespace từ chối: container thiếu `allowPrivilegeEscalation: false` và `capabilities.drop: ["ALL"]` (đã thử với kube-apiserver 1.35).
 - **Duyệt người thật**: chưa có kênh duyệt cho `POST /runs/<id>/resume` ngoài gọi API trực tiếp — cần Slack qua n8n hoặc một trang duyệt tối giản.
 - **Slack qua OpenClaw**: `openclaw plugins install` chưa cài được plugin Slack với kiến trúc `$include` hiện tại — hướng khả thi: tự tải gói, trỏ qua `plugins.load.paths`, bỏ qua bước "install" của CLI.
 - **Chi phí token**: `metrics.py` chưa đo được token thật — chờ acpx phơi số token rồi bổ sung vào `trajectory.step()`.

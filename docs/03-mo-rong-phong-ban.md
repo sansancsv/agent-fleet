@@ -101,6 +101,12 @@ Script sẽ báo lỗi nếu: gói năng lực không tồn tại, hoặc ngư�
 **Xong.** Không sửa code, không deploy lại. Flow chung
 `execution-plane/flows/dept-request.flow.ts` đọc hồ sơ này lúc chạy.
 
+Trên Kubernetes, `langgraph` đọc hồ sơ từ ConfigMap `fleet-profiles` sinh từ
+`profiles/`: sau khi merge, chạy lại lệnh đồng bộ ở `docs/01-cai-dat.md` §B
+("Hồ sơ phòng ban trên Kubernetes"). Không cần khởi động lại pod. Xoá hồ sơ để gỡ
+một phòng ban cũng cần đúng bước này — không chạy thì phòng ban đó vẫn gửi và
+duyệt được trên cụm.
+
 ---
 
 ## Bốn mức nhạy cảm dữ liệu
