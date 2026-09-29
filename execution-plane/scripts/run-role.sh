@@ -117,9 +117,13 @@ except FileNotFoundError:
 text = "".join(chunks)
 
 # Trích khối fleet-status nếu agent tuân thủ hiến chương (xem _shared/AGENTS.md).
+# Lấy khối CUỐI CÙNG: hiến chương đặt nó ở cuối phản hồi, còn khối đầu tiên có
+# thể là khối agent trích lại từ issue/PR (dữ liệu không tin cậy). Bản sao của
+# acpx_client._extract_status(); tests/test_acpx_client.py chạy chính đoạn này
+# để đối chiếu hai bên.
 status = {}
 if "```fleet-status" in text:
-    block = text.split("```fleet-status", 1)[1].split("```", 1)[0]
+    block = text.rsplit("```fleet-status", 1)[1].split("```", 1)[0]
     for row in block.splitlines():
         if ":" in row:
             k, _, v = row.partition(":")

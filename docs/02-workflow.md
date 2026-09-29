@@ -101,10 +101,12 @@ việc mà sai cũng không thiệt hại: gắn nhãn issue, tổng hợp stand
 ### `feature-delivery.flow.ts` — giao hàng tính năng
 ```
 chuẩn bị worktree → phân loại rủi ro → [risky? viết ADR] → hiện thực
-→ viết test → thẩm định chéo → [có mục chặn? sửa lại, tối đa 2 vòng]
-→ CHỜ NGƯỜI DUYỆT → mở PR nháp
+→ viết test → thẩm định chéo → [thẩm định không hoàn tất? DỪNG CHỜ NGƯỜI]
+→ [có mục chặn? sửa lại, tối đa 2 vòng] → CHỜ NGƯỜI DUYỆT → mở PR nháp
 ```
 Điểm đáng chú ý: `implement` dùng Claude, `review` dùng Codex. Khác nhà cung cấp.
+`gate` kiểm từng bước thẩm định bắt buộc đã hoàn tất chưa (`flows/fleet-status.ts`,
+cùng định nghĩa với `turn_problem()`) **trước** khi đếm mục chặn.
 
 ### `incident-triage.flow.ts` — xử lý sự cố
 ```
@@ -117,10 +119,22 @@ hành động đã định nghĩa sẵn; ánh xạ hành động → lệnh nằ
 ### `dept-request.flow.ts` — yêu cầu phòng ban (đa dụng)
 ```
 nạp hồ sơ phòng ban → kiểm quyền (trước khi tiêu token) → phân loại
-→ soạn thảo → thẩm định chéo → [sửa lại] → CHỜ DUYỆT → phát hành
+→ soạn thảo → thẩm định chéo → [không hoàn tất? dừng chờ người] → [sửa lại]
+→ CHỜ DUYỆT → phát hành
 ```
 Điểm đáng chú ý: không có gì riêng cho phòng ban nào trong code. Tất cả nằm
 trong `profiles/*.yaml`.
+
+### `02-pr-review-gate.json` (n8n) — cổng thẩm định pull request
+```
+PR mở/cập nhật → lấy mã nguồn → 3 lượt thẩm định (reviewer · security · analyst)
+→ chờ đủ cả ba → hợp nhất bằng luật → nhận xét + trạng thái commit fleet/cross-review
+```
+Điểm đáng chú ý: **fail closed**. Lượt nào không hoàn tất (runner lỗi, thoát mã
+≠ 0, thiếu khối `fleet-status`, `outcome: blocked`/`rejected`) thì trạng thái là
+`error`, không bao giờ `success`: một lượt hỏng cũng cho ra 0 phát hiện, y hệt
+một PR sạch. `scripts/validate.sh` bước 5e chạy code của node hợp nhất với mọi
+tổ hợp kết quả mẫu để giữ tính chất này.
 
 ---
 

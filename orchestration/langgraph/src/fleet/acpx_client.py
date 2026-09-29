@@ -261,11 +261,21 @@ def _extract_text(ndjson: str) -> str:
 
 
 def _extract_status(text: str) -> dict[str, str]:
-    """Đọc khối ```fleet-status``` mà hiến chương fleet bắt mọi agent phải trả về."""
+    """Đọc khối ```fleet-status``` CUỐI CÙNG mà hiến chương fleet bắt mọi agent trả về.
+
+    Hiến chương đặt khối này ở CUỐI phản hồi. Lấy khối đầu tiên thì một khối mà
+    agent trích lại từ issue/PR (dữ liệu không tin cậy) sẽ ghi đè trạng thái
+    thật — kể cả trường `lesson:`, thứ `graph._after_turn` ghi vào bộ nhớ và
+    nạp lại vào mọi lượt sau.
+
+    Bản sao của logic này nằm trong đoạn Python của
+    `execution-plane/scripts/run-role.sh` (nhánh chạy qua agent-runner). Hai chỗ
+    phải khớp; tests/test_acpx_client.py chạy chính đoạn đó để đối chiếu.
+    """
     marker = "```fleet-status"
     if marker not in text:
         return {}
-    block = text.split(marker, 1)[1].split("```", 1)[0]
+    block = text.rsplit(marker, 1)[1].split("```", 1)[0]
     status: dict[str, str] = {}
     for row in block.splitlines():
         if ":" in row:

@@ -1,7 +1,7 @@
 {
   "name": "Fleet · Cổng thẩm định pull request",
   "meta": {
-    "description": "GitHub mở PR → thẩm định chéo bằng 3 model song song → hợp nhất → đăng nhận xét → cập nhật trạng thái commit. Toàn bộ phần điều phối là XÁC ĐỊNH; chỉ nội dung nhận xét là do model sinh. Clone, chạy agent và dọn dẹp đều qua API của agent-runner — workflow này không chạy lệnh shell."
+    "description": "GitHub mở PR → thẩm định chéo bằng 3 lượt agent → hợp nhất → đăng nhận xét → cập nhật trạng thái commit. Toàn bộ phần điều phối là XÁC ĐỊNH; chỉ nội dung nhận xét là do model sinh. FAIL CLOSED: lượt thẩm định nào không hoàn tất (runner lỗi, thoát mã ≠ 0, thiếu khối fleet-status, outcome blocked/rejected) thì trạng thái là error/failure, không bao giờ success. Clone, chạy agent và dọn dẹp đều qua API của agent-runner — workflow này không chạy lệnh shell."
   },
   "settings": { "executionOrder": "v1", "saveDataErrorExecution": "all", "timezone": "Asia/Ho_Chi_Minh" },
   "nodes": [
@@ -71,14 +71,16 @@
         "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.AGENT_RUNNER_TOKEN }}" }] },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ role: 'reviewer', cwd: $('Lấy mã nguồn PR').item.json.path, prompt: 'Xem diff so với origin/main. CHỈ ĐỌC. Mỗi phát hiện: [MỨC] file:dòng | mô tả | kịch bản hỏng. Mức: BLOCKER|MAJOR|MINOR|NIT.' }) }}",
+        "jsonBody": "={{ JSON.stringify({ role: 'reviewer', cwd: $('Lấy mã nguồn PR').item.json.path, prompt: 'Xem diff so với origin/main. CHỈ ĐỌC. Mỗi phát hiện: [MỨC] file:dòng | mô tả | kịch bản hỏng. Mức: BLOCKER|MAJOR|MINOR|NIT.\\n\\nKẾT THÚC phản hồi bằng khối trạng thái dưới đây, đặt ở CUỐI CÙNG — không viết gì sau nó:\\n```fleet-status\\nrole: <vai trò của bạn>\\noutcome: <ĐÚNG MỘT từ: success | partial | blocked | rejected>\\nconfidence: <0.0–1.0>\\nartifacts: <đường dẫn, phân tách bằng dấu phẩy, hoặc none>\\nnext: <câu hỏi hoặc hành động đề xuất, hoặc none>\\nlesson: <một câu cho lượt sau, hoặc bỏ trống>\\n```\\noutcome: success khi đã thẩm định xong diff — KỂ CẢ khi có phát hiện BLOCKER (mức chặn nằm ở danh sách phát hiện, không nằm ở outcome). outcome: blocked khi KHÔNG thẩm định được (không xem được diff, thiếu quyền). Thiếu thông tin để làm đúng → outcome: blocked và nêu đúng MỘT câu hỏi ở dòng next:. Việc vượt quyền của vai trò → outcome: rejected.' }) }}",
         "options": { "timeout": 1860000 }
       },
       "id": "w-rev-1",
       "name": "Thẩm định · Codex",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [80, 140]
+      "position": [80, 140],
+      "onError": "continueRegularOutput",
+      "notes": "onError = tiếp tục: lỗi gọi agent-runner (504 quá giờ, 429 bận, 502...) vẫn chảy tới node hợp nhất thành một item `error`, để PR nhận trạng thái error kèm lý do thay vì im lặng. Prompt phải tự đòi khối fleet-status: agent chạy qua agent-runner không thấy hiến chương (_shared/AGENTS.md)."
     },
     {
       "parameters": {
@@ -88,14 +90,16 @@
         "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.AGENT_RUNNER_TOKEN }}" }] },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ role: 'security', cwd: $('Lấy mã nguồn PR').item.json.path, prompt: 'Rà bảo mật diff. CHỈ ĐỌC. Tìm: secret bị commit, đầu vào không tin cậy chạm tới lệnh/truy vấn/đường dẫn, quyền bị nới rộng, phụ thuộc mới. Mỗi phát hiện: [MỨC] file:dòng | đường tấn công | cách chặn.' }) }}",
+        "jsonBody": "={{ JSON.stringify({ role: 'security', cwd: $('Lấy mã nguồn PR').item.json.path, prompt: 'Rà bảo mật diff. CHỈ ĐỌC. Tìm: secret bị commit, đầu vào không tin cậy chạm tới lệnh/truy vấn/đường dẫn, quyền bị nới rộng, phụ thuộc mới. Mỗi phát hiện: [MỨC] file:dòng | đường tấn công | cách chặn.\\n\\nKẾT THÚC phản hồi bằng khối trạng thái dưới đây, đặt ở CUỐI CÙNG — không viết gì sau nó:\\n```fleet-status\\nrole: <vai trò của bạn>\\noutcome: <ĐÚNG MỘT từ: success | partial | blocked | rejected>\\nconfidence: <0.0–1.0>\\nartifacts: <đường dẫn, phân tách bằng dấu phẩy, hoặc none>\\nnext: <câu hỏi hoặc hành động đề xuất, hoặc none>\\nlesson: <một câu cho lượt sau, hoặc bỏ trống>\\n```\\noutcome: success khi đã thẩm định xong diff — KỂ CẢ khi có phát hiện BLOCKER (mức chặn nằm ở danh sách phát hiện, không nằm ở outcome). outcome: blocked khi KHÔNG thẩm định được (không xem được diff, thiếu quyền). Thiếu thông tin để làm đúng → outcome: blocked và nêu đúng MỘT câu hỏi ở dòng next:. Việc vượt quyền của vai trò → outcome: rejected.' }) }}",
         "options": { "timeout": 1860000 }
       },
       "id": "w-rev-2",
       "name": "Thẩm định · Bảo mật",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [80, 300]
+      "position": [80, 300],
+      "onError": "continueRegularOutput",
+      "notes": "onError = tiếp tục: lỗi gọi agent-runner (504 quá giờ, 429 bận, 502...) vẫn chảy tới node hợp nhất thành một item `error`, để PR nhận trạng thái error kèm lý do thay vì im lặng. Prompt phải tự đòi khối fleet-status: agent chạy qua agent-runner không thấy hiến chương (_shared/AGENTS.md)."
     },
     {
       "parameters": {
@@ -105,31 +109,32 @@
         "headerParameters": { "parameters": [{ "name": "Authorization", "value": "=Bearer {{ $env.AGENT_RUNNER_TOKEN }}" }] },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ role: 'analyst', cwd: $('Lấy mã nguồn PR').item.json.path, prompt: 'Đánh giá độ bao phủ test của diff. Nêu nhánh nào chưa được test và rủi ro kèm theo. [MỨC] file:dòng | mô tả.' }) }}",
+        "jsonBody": "={{ JSON.stringify({ role: 'analyst', cwd: $('Lấy mã nguồn PR').item.json.path, prompt: 'Đánh giá độ bao phủ test của diff. Nêu nhánh nào chưa được test và rủi ro kèm theo. [MỨC] file:dòng | mô tả.\\n\\nKẾT THÚC phản hồi bằng khối trạng thái dưới đây, đặt ở CUỐI CÙNG — không viết gì sau nó:\\n```fleet-status\\nrole: <vai trò của bạn>\\noutcome: <ĐÚNG MỘT từ: success | partial | blocked | rejected>\\nconfidence: <0.0–1.0>\\nartifacts: <đường dẫn, phân tách bằng dấu phẩy, hoặc none>\\nnext: <câu hỏi hoặc hành động đề xuất, hoặc none>\\nlesson: <một câu cho lượt sau, hoặc bỏ trống>\\n```\\noutcome: success khi đã thẩm định xong diff — KỂ CẢ khi có phát hiện BLOCKER (mức chặn nằm ở danh sách phát hiện, không nằm ở outcome). outcome: blocked khi KHÔNG thẩm định được (không xem được diff, thiếu quyền). Thiếu thông tin để làm đúng → outcome: blocked và nêu đúng MỘT câu hỏi ở dòng next:. Việc vượt quyền của vai trò → outcome: rejected.' }) }}",
         "options": { "timeout": 1860000 }
       },
       "id": "w-rev-3",
       "name": "Thẩm định · Kiểm thử",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [80, 460]
+      "position": [80, 460],
+      "onError": "continueRegularOutput",
+      "notes": "onError = tiếp tục: lỗi gọi agent-runner (504 quá giờ, 429 bận, 502...) vẫn chảy tới node hợp nhất thành một item `error`, để PR nhận trạng thái error kèm lý do thay vì im lặng. Prompt phải tự đòi khối fleet-status: agent chạy qua agent-runner không thấy hiến chương (_shared/AGENTS.md)."
     },
     {
       "parameters": {
-        "mode": "combine",
-        "combineBy": "combineAll",
-        "options": {}
+        "mode": "append",
+        "numberInputs": 3
       },
       "id": "w-merge",
       "name": "Gộp ba kết quả",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
-      "numberInputs": 3,
-      "position": [340, 300]
+      "position": [340, 300],
+      "notes": "Điểm chờ: đợi đủ ba lượt thẩm định (kể cả lượt lỗi) rồi mới hợp nhất. Phải là append với numberInputs nằm trong parameters. Kiểu combine/combineAll gộp hai item đầu vào làm MỘT (lượt sau đè lượt trước) và bỏ qua đầu vào thứ ba: phát hiện của reviewer và analyst mất trắng."
     },
     {
       "parameters": {
-        "jsCode": "// Hợp nhất phát hiện bằng LUẬT, không bằng model.\n// Quy tắc \"bằng chứng hoặc im lặng\": BLOCKER không có file:dòng thì bị loại.\n// Mỗi item là JSON mà agent-runner trả về từ POST /run: { role, exit, text, status }.\nconst RE = /\\[?(BLOCKER|CRITICAL|MAJOR|MINOR|NIT)\\]?\\s*([\\w./-]+:\\d+)?\\s*[|:-]?\\s*(.+)/i;\nconst RANK = { CRITICAL: 5, BLOCKER: 4, MAJOR: 3, MINOR: 2, NIT: 1 };\n\nconst byKey = new Map();\nfor (const item of $input.all()) {\n  const payload = item.json || {};\n  for (const line of String(payload.text || '').split('\\n')) {\n    const m = RE.exec(line);\n    if (!m) continue;\n    const sev = m[1].toUpperCase();\n    const loc = m[2] || '';\n    if ((sev === 'BLOCKER' || sev === 'CRITICAL') && !loc) continue;\n    const key = `${loc}|${(m[3] || '').slice(0, 60).toLowerCase()}`;\n    const prev = byKey.get(key);\n    if (prev) { prev.votes += 1; if (RANK[sev] > RANK[prev.severity]) prev.severity = sev; }\n    else byKey.set(key, { severity: sev, location: loc, detail: m[3].trim(), votes: 1, role: payload.role });\n  }\n}\n\nconst findings = [...byKey.values()].sort((a, b) => RANK[b.severity] - RANK[a.severity] || b.votes - a.votes);\nconst blockers = findings.filter(f => f.severity === 'BLOCKER' || f.severity === 'CRITICAL');\n\nconst body = [\n  '## Thẩm định tự động của Agent Fleet', '',\n  blockers.length ? `**${blockers.length} mục chặn merge.**` : '**Không có mục chặn merge.**', '',\n  '| Mức | Vị trí | Vấn đề | Đồng thuận |', '|---|---|---|---|',\n  ...findings.slice(0, 40).map(f => `| ${f.severity} | \\`${f.location || '—'}\\` | ${f.detail.replace(/\\|/g, '\\\\|').slice(0, 200)} | ${f.votes}/3 |`),\n  '', '_Ba model của ba nhà cung cấp khác nhau cùng soi diff này. Cột “đồng thuận” cho biết bao nhiêu model cùng nêu một vấn đề — mục 3/3 gần như chắc chắn là thật._',\n].join('\\n');\n\nreturn [{ json: { findings, blockerCount: blockers.length, body, state: blockers.length ? 'failure' : 'success' } }];"
+        "jsCode": "// Hợp nhất phát hiện bằng LUẬT, không bằng model — và FAIL CLOSED.\n//\n// Một lượt thẩm định chỉ HOÀN TẤT khi thoát mã 0, có khối fleet-status và\n// `outcome` là success hoặc partial: cùng định nghĩa với policies.turn_problem()\n// của LangGraph. run-role.sh tách khối fleet-status CUỐI CÙNG vào `status`.\n// Lượt lỗi (runner 504/429/502, thoát mã ≠ 0, thiếu khối, blocked/rejected,\n// nhãn lạ) cũng cho ra 0 phát hiện. Nếu không kiểm ở đây, nó trông y hệt một PR\n// sạch. Không hoàn tất ≠ sạch: trạng thái khi đó là `error`, hoặc `failure` nếu\n// đã có mục chặn. KHÔNG BAO GIỜ là `success`.\n//\n// Đọc kết quả theo TÊN NODE, không theo thứ tự item: item lỗi của node HTTP\n// (onError = tiếp tục) không mang `role`, và vai trò vắng mặt cũng phải bị tính\n// là không hoàn tất. Đổi tên node thẩm định thì sửa cả bảng REVIEWS.\n//\n// Quy tắc \"bằng chứng hoặc im lặng\": BLOCKER/CRITICAL không có file:dòng bị loại.\n// scripts/check-review-gate.mjs chạy chính đoạn code này với các payload mẫu.\nconst REVIEWS = [\n  { node: 'Thẩm định · Codex', role: 'reviewer' },\n  { node: 'Thẩm định · Bảo mật', role: 'security' },\n  { node: 'Thẩm định · Kiểm thử', role: 'analyst' },\n];\nconst OUTCOMES = ['success', 'partial', 'blocked', 'rejected'];\nconst RE = /\\[?(BLOCKER|CRITICAL|MAJOR|MINOR|NIT)\\]?\\s*([\\w./-]+:\\d+)?\\s*[|:-]?\\s*(.+)/i;\nconst RANK = { CRITICAL: 5, BLOCKER: 4, MAJOR: 3, MINOR: 2, NIT: 1 };\n\nconst oneLine = (v, max) => String(v ?? '').replace(/\\s+/g, ' ').trim().slice(0, max);\nconst cell = (v, max) => oneLine(v, max).replace(/\\|/g, '\\\\|');\n\n// Lỗi HTTP: n8n cho `status` và message dạng '504 - \"<thân đã escape>\"' (riêng 429 thì\n// message bị thay bằng lời khuyên của n8n). Chỉ lấy trường `error` của agent-runner:\n// thân 502 có thể kèm stderr của run-role.sh, không được đưa lên PR.\nfunction errorReason(e) {\n  const o = e && typeof e === 'object' ? e : { message: e };\n  const msg = String(o.message ?? '');\n  const m = /^(\\d{3}) - \"(.*)\"$/s.exec(msg);\n  const code = o.status || (m && m[1]);\n  if (!code) return `không gọi được agent-runner: ${oneLine(msg || o.name || 'không rõ lỗi', 100)}`;\n  let why = '';\n  if (m) { try { why = JSON.parse(JSON.parse(`\"${m[2]}\"`)).error || ''; } catch (_) { /* thân không phải JSON */ } }\n  return `agent-runner trả HTTP ${code}${why ? `: ${oneLine(why, 100)}` : ''}`;\n}\n\n// Lý do lượt KHÔNG hoàn tất; chuỗi rỗng = hoàn tất.\nfunction turnProblem(p, role) {\n  if ('error' in p) return errorReason(p.error);\n  if (p.exit !== 0) return typeof p.exit === 'number' ? `thoát mã ${p.exit}` : 'không có mã thoát';\n  if (p.role !== role) return `vai trò trả về là '${oneLine(p.role, 30)}', không phải '${role}'`;\n  const st = p.status;\n  if (!st || typeof st !== 'object' || Array.isArray(st) || !Object.keys(st).length) {\n    return 'thiếu khối fleet-status';\n  }\n  if (!Object.prototype.hasOwnProperty.call(st, 'outcome')) return 'khối fleet-status thiếu outcome';\n  const outcome = String(st.outcome).trim().replace(/^[`'\".]+|[`'\".]+$/g, '').toLowerCase();\n  if (!OUTCOMES.includes(outcome)) return `outcome không hợp lệ: '${outcome.slice(0, 40)}'`;\n  if (outcome === 'blocked' || outcome === 'rejected') return `outcome: ${outcome}`;\n  return '';\n}\n\nconst runs = [];\nconst byKey = new Map();\nfor (const { node, role } of REVIEWS) {\n  let items = [];\n  try { items = $(node).all(); } catch (e) { /* node không chạy, hoặc đã bị đổi tên */ }\n  if (!items.length) runs.push({ role, reason: 'không có kết quả thẩm định', session: '' });\n  for (const item of items) {\n    const p = item && item.json && typeof item.json === 'object' ? item.json : {};\n    runs.push({ role, reason: turnProblem(p, role), session: oneLine(p.session, 80) });\n    // Vẫn đọc phát hiện của lượt không hoàn tất: chỉ làm kết quả chặt hơn, không lỏng hơn.\n    for (const line of String(p.text || '').split('\\n')) {\n      const m = RE.exec(line);\n      if (!m) continue;\n      const sev = m[1].toUpperCase();\n      const loc = m[2] || '';\n      if ((sev === 'BLOCKER' || sev === 'CRITICAL') && !loc) continue;\n      const key = `${loc}|${m[3].slice(0, 60).toLowerCase()}`;\n      const prev = byKey.get(key);\n      if (prev) { prev.roles.add(role); if (RANK[sev] > RANK[prev.severity]) prev.severity = sev; }\n      else byKey.set(key, { severity: sev, location: loc, detail: m[3].trim(), roles: new Set([role]) });\n    }\n  }\n}\n\nconst total = REVIEWS.length;\nconst failed = runs.filter((r) => r.reason);\nconst failedRoles = [...new Set(failed.map((r) => r.role))];\n// \"Đồng thuận\" = số VAI TRÒ khác nhau cùng nêu một vấn đề, không phải số dòng trùng.\nconst findings = [...byKey.values()]\n  .map((f) => ({ severity: f.severity, location: f.location, detail: f.detail, votes: f.roles.size, roles: [...f.roles] }))\n  .sort((a, b) => RANK[b.severity] - RANK[a.severity] || b.votes - a.votes);\nconst blockers = findings.filter((f) => f.severity === 'BLOCKER' || f.severity === 'CRITICAL');\nconst state = blockers.length ? 'failure' : failed.length ? 'error' : 'success';\n\nconst parts = [];\nif (blockers.length || !failed.length) parts.push(`${blockers.length} mục chặn`);\nparts.push(failed.length\n  ? `Thẩm định KHÔNG hoàn tất (${failedRoles.length}/${total}): ${failed.map((r) => `${r.role}: ${r.reason}`).join('; ')}`\n  : `${total}/${total} lượt thẩm định hoàn tất`);\n// GitHub trả 422 nếu description dài quá 140 ký tự.\nconst chars = [...parts.join(' · ')];\nconst description = chars.length > 140 ? `${chars.slice(0, 139).join('')}…` : chars.join('');\n\nconst lines = ['## Thẩm định tự động của Agent Fleet', ''];\nif (failed.length) {\n  lines.push(\n    `**Thẩm định KHÔNG hoàn tất: ${failedRoles.length}/${total} vai trò không cho kết quả dùng được.** ` +\n      'Lượt hỏng cũng cho ra 0 phát hiện, nên kết quả này KHÔNG phải một lần thẩm định sạch.',\n    '',\n    '| Vai trò | Lý do | Phiên |', '|---|---|---|',\n    ...failed.map((r) => `| ${r.role} | ${cell(r.reason, 200)} | ${r.session ? `\\`${cell(r.session, 80).replace(/`/g, '')}\\`` : '—'} |`),\n    '',\n  );\n}\nlines.push(\n  blockers.length ? `**${blockers.length} mục chặn merge.**`\n    : failed.length ? '**Không thấy mục chặn trong các lượt đã chạy — chưa đủ để kết luận.**'\n    : '**Không có mục chặn merge.**',\n  '',\n);\nif (findings.length) {\n  lines.push(\n    '| Mức | Vị trí | Vấn đề | Đồng thuận |', '|---|---|---|---|',\n    ...findings.slice(0, 40).map((f) => `| ${f.severity} | \\`${f.location || '—'}\\` | ${cell(f.detail, 200)} | ${f.votes}/${total} |`),\n    '',\n  );\n}\nlines.push(\n  `_${total} lượt thẩm định độc lập (${REVIEWS.map((r) => r.role).join(', ')}) cùng soi diff này. ` +\n    'Cột “đồng thuận” cho biết bao nhiêu lượt cùng nêu một vấn đề. Một lượt chỉ được tính khi thoát mã 0 ' +\n    'và kết thúc bằng khối `fleet-status` có outcome success hoặc partial._',\n);\n\nreturn [{\n  json: {\n    state, description, blockerCount: blockers.length, incompleteRoles: failedRoles,\n    reviews: runs, findings, body: lines.join('\\n'),\n  },\n  // Item này suy ra từ mọi item đầu vào (cả ba lượt thẩm định).\n  pairedItem: $input.all().map((_, i) => ({ item: i })),\n}];"
       },
       "id": "w-consolidate",
       "name": "Hợp nhất phát hiện (luật)",
@@ -168,7 +173,7 @@
         ]},
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ state: $('Hợp nhất phát hiện (luật)').item.json.state, context: 'fleet/cross-review', description: `${$('Hợp nhất phát hiện (luật)').item.json.blockerCount} mục chặn` }) }}",
+        "jsonBody": "={{ JSON.stringify({ state: $('Hợp nhất phát hiện (luật)').item.json.state, context: 'fleet/cross-review', description: $('Hợp nhất phát hiện (luật)').item.json.description }) }}",
         "options": {}
       },
       "id": "w-status",
@@ -176,7 +181,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [800, 380],
-      "notes": "Trạng thái commit là thứ chặn nút Merge trên GitHub. Nhận xét chỉ để đọc; trạng thái mới có hiệu lực."
+      "notes": "Trạng thái commit là thứ chặn nút Merge trên GitHub. Nhận xét chỉ để đọc; trạng thái mới có hiệu lực. Chỉ `success` khi CẢ BA lượt thẩm định hoàn tất và không có mục chặn; lượt nào không hoàn tất thì `error` (hoặc `failure` nếu có mục chặn). Mô tả đã được cắt ≤ 140 ký tự vì GitHub trả 422 nếu dài hơn."
     },
     {
       "parameters": {

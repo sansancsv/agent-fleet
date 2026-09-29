@@ -54,7 +54,7 @@ cd orchestration/langgraph && PYTHONPATH=src uv run --no-project --python 3.12 \
   --with "fastapi>=0.115" --with httpx --with "pyyaml>=6.0" python -m pytest tests/ -q -p no:cacheprovider
 ```
 
-Runner API (Node thuần, không có package.json): `node --check execution-plane/runner/server.mjs`. `validate.sh` bước 5b làm việc này khi có `node`; bước 5c từ chối mọi workflow n8n chứa `n8n-nodes-base.executeCommand`.
+Runner API (Node thuần, không có package.json): `node --check execution-plane/runner/server.mjs`. `validate.sh` bước 5b làm việc này khi có `node`; bước 5c từ chối mọi workflow n8n chứa `n8n-nodes-base.executeCommand`; bước 5e (`node scripts/check-review-gate.mjs`) chạy chính code của node hợp nhất trong `02-pr-review-gate.json` với mọi tổ hợp kết quả thẩm định mẫu.
 
 Từ Windows, chạy script kiểm chứng trong WSL: `wsl -d Ubuntu -- bash -lc 'cd ~/agent-fleet && ./scripts/validate.sh'` (shell không tương tác của WSL không có `node`/`pytest` trên PATH; validate.sh tự bỏ qua các bước đó và báo rõ).
 
@@ -161,6 +161,12 @@ Phần lớn được `scripts/validate.sh` và `scripts/check-oc-placeholders.p
 - Ảnh `mcporter` tách riêng khỏi `agent-runner` (`Dockerfile.mcporter`): pod giữ credential MCP không được chứa sẵn acpx/gh/git/run-role.sh — lộ credential MCP không đồng nghĩa lộ quyền chạy code.
 - Namespace có hai đường ra Internet (mcporter + gateway cho Slack Socket Mode), cộng một rule 443 tạm thời cho agent-runner cho tới khi có `llm-egress-gateway`.
 
+**n8n (`orchestration/n8n/workflows/`, đối chiếu n8n 2.36.9)**:
+- Node Merge v3 kiểu `combine`/`combineAll` gộp item của đầu vào 1 và 2 thành **một** (trường trùng tên: đầu vào sau đè) và bỏ qua mọi đầu vào từ thứ 3. Muốn chờ đủ N nhánh rồi xử lý từng kết quả thì dùng `mode: append` với `numberInputs` đặt **trong** `parameters` (đặt ở cấp node thì bị bỏ qua).
+- Node httpRequest không có `onError` thì một phản hồi non-2xx dừng cả workflow: không nhận xét, không trạng thái commit, không dọn dẹp. Với `onError: continueRegularOutput`, item lỗi có dạng `{ error: { message, status } }` và **không** mang `role` của payload, nên node hợp nhất đọc kết quả theo tên node (`$('<tên node>').all()`), không theo thứ tự item. Riêng 429, n8n thay `message` bằng lời khuyên của chính nó; mã HTTP nằm ở `error.status`.
+- **Không hoàn tất ≠ sạch.** `02-pr-review-gate.json` chỉ báo `success` khi mọi lượt thẩm định trả HTTP 200, `exit` = 0, có khối `fleet-status` và `outcome` là `success`/`partial` (cùng định nghĩa với `policies.turn_problem` của LangGraph); lượt nào không đạt thì `error` (hoặc `failure` nếu đã có mục chặn). Đổi tên node thẩm định thì sửa cả bảng `REVIEWS` trong node hợp nhất; bước 5e của `validate.sh` bắt chỗ lệch.
+- `description` của commit status trên GitHub tối đa 140 ký tự (dài hơn → 422); node hợp nhất cắt sẵn.
+
 ## Lưu ý môi trường
 
 - Trên WSL, đặt repo trên filesystem Linux (`~/agent-fleet`), không phải `/mnt/c`: mất bit `+x`, `.env` không giữ được 600, I/O chậm. Compose gọi script qua `bash <path>` để chịu được mất `+x`.
@@ -175,3 +181,5 @@ Phần lớn được `scripts/validate.sh` và `scripts/check-oc-placeholders.p
 - **Slack qua OpenClaw**: `openclaw plugins install` chưa cài được plugin Slack với kiến trúc `$include` hiện tại — hướng khả thi: tự tải gói, trỏ qua `plugins.load.paths`, bỏ qua bước "install" của CLI.
 - **Chi phí token**: `metrics.py` chưa đo được token thật — chờ acpx phơi số token rồi bổ sung vào `trajectory.step()`.
 - **`llm-egress-gateway`**: thay rule 443 tạm thời cho agent-runner bằng một cổng ra Internet có kiểm soát tên miền.
+- **Cổng thẩm định PR thấy được diff**: ba vai trò thẩm định chạy `--deny-all` nên không tự chạy `git diff` được (chú thích đầu `fanout-review.sh`), và prompt của `02-pr-review-gate.json` chưa nhúng diff. Khi agent báo `outcome: blocked` vì không xem được diff, cổng báo `error` — đúng, vì không có gì được xác nhận. Hướng sửa: runner tính diff rồi đưa vào prompt qua file/stdin (một đối số argv giới hạn khoảng 128 KiB).
+- **acpx flow chạy được thật**: ba file `execution-plane/flows/*.flow.ts` viết theo một API minh hoạ (`steps`, cạnh là hàm, `limits.maxStepRuns`, hàm nhận `(input, prev)`). acpx thật (đối chiếu 0.13.2 và 0.19.3) dùng `defineFlow({ name, startAt, nodes, edges })` và từ chối nạp cả ba file, nên `make demo-flow` hỏng. Cần viết lại theo API thật; phần kiểm lượt hoàn tất đã tách ra `flows/fleet-status.ts`.

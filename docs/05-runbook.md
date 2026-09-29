@@ -404,6 +404,39 @@ không thay thế được `make test`. Mọi node chạm git/GitHub/LLM thật 
 (`orchestration/n8n/workflows/04-duyet-task.json`) hoặc gọi thẳng
 `/runs/<id>/resume`.
 
+### Trạng thái `fleet/cross-review` trên PR là `error`
+
+Cổng thẩm định PR (`orchestration/n8n/workflows/02-pr-review-gate.json`) **fail
+closed**: một lượt thẩm định chỉ được tính khi agent-runner trả HTTP 200, `exit`
+= 0, có khối `fleet-status` và `outcome` là `success` hoặc `partial`. Lượt nào
+không đạt thì trạng thái là `error` (hoặc `failure` nếu lượt khác đã nêu mục
+chặn), không bao giờ `success`. Mô tả trạng thái và bảng đầu nhận xét trên PR
+nêu vai trò và lý do:
+
+| Lý do | Nghĩa là | Xử lý |
+|---|---|---|
+| `agent-runner trả HTTP 504: vượt quá 1800s` | lượt chạy quá giờ | xem "Lượt agent bị treo" |
+| `agent-runner trả HTTP 429` | runner đang bận | xem bảng ở mục `agent-runner trả 401` phía trên |
+| `agent-runner trả HTTP 502: run-role.sh không trả JSON` | `run-role.sh` chết giữa chừng | `make logs S=agent-runner` |
+| `không gọi được agent-runner: …` | lỗi mạng hoặc runner không chạy | `make health` |
+| `thoát mã N` | acpx thoát lỗi (thiếu khoá, backend lỗi…) | `$FLEET_LOG_DIR/<vai-trò>/<phiên>.err` của agent-runner; tên phiên ở cột "Phiên" của nhận xét |
+| `thiếu khối fleet-status` / `outcome không hợp lệ: …` | agent không kết thúc bằng khối trạng thái hợp lệ | `<phiên>.ndjson` cùng thư mục; prompt của ba node thẩm định phải còn đòi khối này |
+| `outcome: blocked` | agent tự báo không thẩm định được | đọc dòng `next:` trong `<phiên>.ndjson`; xem đoạn dưới |
+| `không có kết quả thẩm định` | node thẩm định không chạy, hoặc đã bị đổi tên | tên node phải khớp bảng `REVIEWS` trong node "Hợp nhất phát hiện (luật)" |
+
+PR không có trạng thái nào là chuyện khác: workflow dừng trước khi thẩm định,
+thường ở bước `Lấy mã nguồn PR` (clone lỗi, thiếu `GITHUB_TOKEN`); xem execution
+lỗi trong n8n. Chạy lại bằng một commit mới, hoặc chạy lại job GitHub Actions
+chuyển tiếp sự kiện `pull_request` (mục dưới). Đừng "chữa" bằng cách nới luật
+trong node hợp nhất: cho qua khi thẩm định không chạy được chính là lỗi mà cơ
+chế này chặn, và `scripts/validate.sh` bước 5e sẽ đỏ.
+
+Nếu **mọi** PR đều `error` vì reviewer báo `outcome: blocked` do không xem được
+diff: ba vai trò thẩm định chạy `--deny-all` (`run-role.sh`) nên không tự chạy
+`git diff` được (chú thích đầu `execution-plane/scripts/fanout-review.sh`), và
+prompt chưa nhúng sẵn diff. Khi đó `error` là tín hiệu thật — cổng không xác
+nhận được gì về PR. Hướng sửa nằm ở Roadmap trong `CLAUDE.md`.
+
 ### Webhook GitHub gọi vào n8n luôn thất bại xác thực, dù đã đúng URL
 
 GitHub repo Webhook (Settings → Webhooks) **không gửi được header tuỳ ý** —
