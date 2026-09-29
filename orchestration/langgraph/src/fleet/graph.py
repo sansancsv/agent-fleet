@@ -392,6 +392,15 @@ def _pr_body(state: FleetState) -> str:
 # ---------------------------------------------------------------------------
 # LẮP ĐỒ THỊ
 # ---------------------------------------------------------------------------
+# MỌI vai trò mà đồ thị này CÓ THỂ gọi — kể cả vai trò chỉ chạy trên nhánh
+# risky (`design` → architect, `cross_review` → security). Chốt dataClass của
+# `POST /runs/wait` (server.py) kiểm backend của từng vai trò ở đây TRƯỚC khi có
+# thread nào: lúc đó chưa biết nhánh nào sẽ chạy, vì mức rủi ro do một lượt
+# model phán. Nút mới gọi vai trò chưa khai ở đây là một đường vòng qua chốt;
+# tests/test_graph_roles.py quét file này và đỏ khi điều đó xảy ra.
+GRAPH_ROLES: tuple[str, ...] = ("orchestrator", "architect", "implementer", "reviewer", "security")
+
+
 def build_graph(checkpointer=None):
     g = StateGraph(FleetState)
 
