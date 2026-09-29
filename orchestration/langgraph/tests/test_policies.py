@@ -6,7 +6,7 @@ thống mất tác dụng kiểm soát. Các hàm này thuần tuý nên test đ
 import pytest
 
 from fleet.policies import (
-    assert_backend_allowed, over_budget, parse_findings, risk_from_text,
+    allowed_backends, assert_backend_allowed, over_budget, parse_findings, risk_from_text,
 )
 from fleet.state import blockers, initial_state
 
@@ -50,6 +50,31 @@ class TestModelPolicy:
     def test_du_lieu_cong_khai_dung_moi_backend(self):
         for b in ("claude", "codex", "gemini", "local-llm"):
             assert_backend_allowed(b, "public")
+
+    def test_du_lieu_mat_chi_claude_va_model_noi_bo(self):
+        # Đúng vi phạm cũ của support.yaml: confidential từng phân loại và thẩm
+        # định trên Gemini.
+        for b in ("claude", "local-llm"):
+            assert_backend_allowed(b, "confidential")
+        for b in ("gemini", "codex"):
+            with pytest.raises(PermissionError):
+                assert_backend_allowed(b, "confidential")
+
+    @pytest.mark.parametrize("data_class", ["", "bi-mat", "Restricted"])
+    def test_muc_du_lieu_la_thi_tu_choi_moi_backend(self, data_class):
+        # Fail closed: hồ sơ quên khai hoặc gõ nhầm dataClass KHÔNG được hiểu
+        # là "không ràng buộc" (trước đây là KeyError, lọt qua `except
+        # PermissionError` của bên gọi).
+        for b in ("claude", "codex", "gemini", "local-llm"):
+            with pytest.raises(PermissionError):
+                assert_backend_allowed(b, data_class)
+        assert allowed_backends(data_class) == []
+
+    def test_allowed_backends_khong_lo_bang_chinh_sach(self):
+        # Bên gọi sửa danh sách trả về không được nới chính sách cho lần gọi sau.
+        allowed_backends("restricted").append("gemini")
+        with pytest.raises(PermissionError):
+            assert_backend_allowed("gemini", "restricted")
 
 
 class TestBudget:

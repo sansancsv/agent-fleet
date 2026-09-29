@@ -13,7 +13,7 @@ Vì sao tự viết server thay vì dùng `langgraph up` / LangGraph Server:
      `GET /profiles/<tên>/authorize`. Đó là API của fleet này, không phải API
      của LangGraph Server. Tự viết thì hai bên khớp nhau theo đúng nghĩa đen.
 
-Hai chốt bảo vệ của API này (cả hai đều fail closed):
+Ba chốt bảo vệ của API này (cả ba đều fail closed):
 
   * Mọi endpoint trừ /ok đòi `Authorization: Bearer $LANGGRAPH_TOKEN`. Thiếu
     biến môi trường thì API trả 503 cho mọi yêu cầu — không âm thầm mở.
@@ -21,6 +21,10 @@ Hai chốt bảo vệ của API này (cả hai đều fail closed):
     `approvers` của hồ sơ phòng ban gắn với thread đó; nếu không → 403. Đây là
     điểm biến "agent đề xuất" thành "người quyết định", nên nó không được phép
     tin vào bất kỳ ai gửi `approved: true`.
+  * `/profiles/<tên>/run` là chốt dataClass. Backend của vai trò sắp chạy phải
+    nằm trong danh sách mà mức nhạy cảm dữ liệu của hồ sơ cho phép
+    (`policies.assert_backend_allowed`); nếu không → 403, và KHÔNG có lượt
+    agent nào chạy. Không bao giờ "chạy tạm" trên một backend khác.
 
 Chạy:  uvicorn fleet.server:app --host 0.0.0.0 --port 8000
 =============================================================================
@@ -42,7 +46,9 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from . import trajectory
-from .graph import build_graph
+from .acpx_client import ROLE_BACKENDS, AcpxError, run_role
+from .graph import REPO_ROOT, build_graph
+from .policies import assert_backend_allowed
 from .state import blockers, initial_state
 
 PROFILES_DIR = Path(os.environ.get("FLEET_PROFILES_DIR", "/fleet/profiles"))
@@ -143,11 +149,15 @@ async def list_profiles() -> dict:
     return {"profiles": sorted(p.stem for p in PROFILES_DIR.glob("*.yaml") if p.stem != "_schema")}
 
 
+def _requester_allowed(profile: dict, requester: str) -> bool:
+    allowed = profile.get("requesters", []) or []
+    return requester in allowed or "*" in allowed
+
+
 @app.get("/profiles/{name}/authorize", dependencies=[Protected])
 async def authorize(name: str, requester: str = "") -> dict:
     profile = _load_profile(name)
-    allowed = profile.get("requesters", []) or []
-    ok_ = requester in allowed or "*" in allowed
+    ok_ = _requester_allowed(profile, requester)
     return {
         "allowed": ok_,
         "profile": name,
@@ -155,6 +165,97 @@ async def authorize(name: str, requester: str = "") -> dict:
         "dataClass": profile.get("dataClass"),
         "approvers": profile.get("approvers", []),
         "reason": "" if ok_ else f"'{requester}' không nằm trong danh sách của phòng {name}",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Lượt agent cho phòng ban — CHỐT dataClass trước khi bất kỳ model nào thấy dữ liệu
+# ---------------------------------------------------------------------------
+# Vai trò chạy yêu cầu của các phòng ban ngoài kỹ thuật: chỉ đọc. Backend của nó
+# tra ở ROLE_BACKENDS; validate.sh bước 8a canh bảng đó trùng run-role.sh — thứ
+# agent-runner thật sự chạy.
+DEPT_ROLE = "analyst"
+DEPT_TIMEOUT_S = 900
+
+
+class DeptRunRequest(BaseModel):
+    task_id: str = Field(min_length=1)   # mã yêu cầu của n8n — để đối chiếu audit
+    requester: str = ""
+    request: str
+
+
+@app.post("/profiles/{name}/run", dependencies=[Protected])
+async def dept_run(name: str, req: DeptRunRequest) -> dict:
+    """Một lượt agent cho yêu cầu phòng ban, CHỈ SAU KHI qua chốt dataClass.
+
+    Đây là chỗ biết cả hai vế của ràng buộc "dataClass quyết định backend":
+    hồ sơ (nạp ở đây) và backend (của vai trò sắp chạy). agent-runner cố ý
+    không có bảng vai trò, còn n8n không nên giữ bản sao chính sách — nên chốt
+    nằm ở đây, trong code có test.
+
+    Thứ tự kiểm, và vì sao:
+      1. Người gửi phải thuộc `requesters` của hồ sơ (403). Kiểm lại dù n8n đã
+         gọi /authorize: endpoint này là chỗ tiêu token, không được dựa vào
+         việc bên gọi đã kiểm trước.
+      2. Backend của DEPT_ROLE phải nằm trong danh sách mà dataClass của hồ sơ
+         cho phép (403). Không có thì TỪ CHỐI; dataClass thiếu hoặc lạ cũng bị
+         từ chối. Đây là chỗ trước đây finance/legal (restricted) và support
+         (confidential) lặng lẽ chạy trên Gemini.
+      3. Chỉ khi qua hết mới gọi agent-runner. Mọi lần từ chối ghi audit ra
+         stdout VÀ vào vết chạy (bền qua restart, như chốt người duyệt).
+    """
+    if not req.request.strip():
+        raise HTTPException(400, "Thiếu nội dung yêu cầu")
+    profile = _load_profile(name)
+
+    if not _requester_allowed(profile, req.requester):
+        _audit("permission.decision", task_id=req.task_id, profile=name, by=req.requester,
+               allowed=False, reason="not-a-requester")
+        trajectory.permission_denied(req.task_id, profile=name, by=req.requester,
+                                      reason="not-a-requester")
+        raise HTTPException(403, f"'{req.requester}' không nằm trong danh sách của phòng {name}")
+
+    data_class = str(profile.get("dataClass") or "")
+    backend = ROLE_BACKENDS[DEPT_ROLE][0]
+    decision = {"task_id": req.task_id, "profile": name, "requester": req.requester,
+                "data_class": data_class, "role": DEPT_ROLE, "backend": backend}
+    try:
+        assert_backend_allowed(backend, data_class)
+    except PermissionError as exc:
+        _audit("policy.decision", **decision, allowed=False, reason="backend-not-allowed")
+        trajectory.permission_denied(req.task_id, profile=name, by=req.requester,
+                                      reason=f"backend-not-allowed:{backend}")
+        raise HTTPException(
+            403,
+            f"{exc}. Lượt phòng ban chạy vai trò '{DEPT_ROLE}' trên backend '{backend}', "
+            f"nên hồ sơ '{name}' chưa có đường chạy hợp lệ ở đây — từ chối thay vì gửi dữ "
+            "liệu sang backend không được phép (xem docs/03-mo-rong-phong-ban.md).",
+        ) from None
+    _audit("policy.decision", **decision, allowed=True)
+
+    prompt = (
+        f"Yêu cầu từ phòng {name}. Trả lời ngắn, kèm nguồn.\n\n"
+        f'<untrusted source="requester">\n{req.request}\n</untrusted>'
+    )
+    try:
+        # deny-all tường minh: yêu cầu phòng ban không bao giờ được ghi, kể cả
+        # khi ai đó đổi quyền mặc định của vai trò trong ROLE_BACKENDS.
+        res = await run_role(DEPT_ROLE, prompt, REPO_ROOT, permission="deny-all",
+                             timeout_s=DEPT_TIMEOUT_S)
+    except AcpxError as exc:
+        raise HTTPException(502, f"Lượt '{DEPT_ROLE}' của hồ sơ '{name}' thất bại: {exc}") from None
+
+    return {
+        "task_id": req.task_id,
+        "profile": name,
+        "dataClass": data_class,
+        "role": DEPT_ROLE,
+        "backend": backend,
+        "exit_code": res.exit_code,
+        "outcome": res.outcome,
+        "status": res.status,
+        "text": res.text,
+        "duration_ms": res.duration_ms,
     }
 
 

@@ -66,6 +66,9 @@ DataClass = Literal["public", "internal", "confidential", "restricted"]
 
 # `restricted` = dữ liệu không được rời hạ tầng công ty (lương, hồ sơ nhân sự,
 # dữ liệu khách hàng có định danh). Chỉ model tự host được phép xử lý.
+#
+# Bản sao của `policy/model-routing.yaml` (nguồn sự thật) và `allowed_backends`
+# trong `policy/opa/fleet.rego`. validate.sh bước 8a kiểm ba bảng khớp nhau.
 MODEL_POLICY: dict[DataClass, list[str]] = {
     "public": ["claude", "codex", "gemini", "local-llm"],
     "internal": ["claude", "codex", "gemini", "local-llm"],
@@ -74,15 +77,28 @@ MODEL_POLICY: dict[DataClass, list[str]] = {
 }
 
 
-def allowed_backends(data_class: DataClass) -> list[str]:
-    return MODEL_POLICY[data_class]
+def allowed_backends(data_class: str) -> list[str]:
+    """Backend được xử lý dữ liệu mức này. Mức lạ → danh sách rỗng (fail closed)."""
+    return list(MODEL_POLICY.get(data_class, []))  # type: ignore[call-overload]
 
 
-def assert_backend_allowed(backend: str, data_class: DataClass) -> None:
-    if backend not in MODEL_POLICY[data_class]:
+def assert_backend_allowed(backend: str, data_class: str) -> None:
+    """Ném PermissionError nếu `backend` không được xử lý dữ liệu mức `data_class`.
+
+    `data_class` đến từ YAML của hồ sơ nên có thể thiếu hoặc gõ nhầm. Mức không
+    có trong MODEL_POLICY bị từ chối với MỌI backend — không bao giờ được hiểu
+    là "không ràng buộc".
+    """
+    allowed = MODEL_POLICY.get(data_class)  # type: ignore[call-overload]
+    if allowed is None:
+        raise PermissionError(
+            f"dataClass '{data_class}' không có trong chính sách model "
+            f"({', '.join(MODEL_POLICY)}) — không backend nào được phép"
+        )
+    if backend not in allowed:
         raise PermissionError(
             f"Backend '{backend}' không được phép xử lý dữ liệu mức '{data_class}'. "
-            f"Được phép: {', '.join(MODEL_POLICY[data_class])}"
+            f"Được phép: {', '.join(allowed)}"
         )
 
 
