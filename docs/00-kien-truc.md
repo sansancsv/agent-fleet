@@ -44,6 +44,7 @@ Ranh giới rõ nghĩa là: **đổi một tầng không phải sửa ba tầng 
    • implement: acpx claude, quyền approve-all            ← phi xác định
      (không hoàn tất hoặc diff rỗng → leo thang ngay)     ← xác định
    • review   : acpx codex,  quyền deny-all               ← khác nhà cung cấp
+     (diff do code trích sẵn; vượt trần → leo thang)      ← xác định
      (mỗi lượt agent = một POST /run tới dịch vụ agent-runner)
    • gate     : hàm thuần tuý: thẩm định không hoàn tất   ← xác định
                 → leo thang; còn mục chặn → sửa lại
