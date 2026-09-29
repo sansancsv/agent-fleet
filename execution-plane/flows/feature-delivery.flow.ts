@@ -24,6 +24,17 @@
  */
 
 import { defineFlow, acp, action, compute, decision, checkpoint, decisionEdge } from "acpx/flows";
+import { statusContract, turnProblem } from "./fleet-status.ts";
+
+// Một nguồn duy nhất cho cả cạnh (gọi securityScan hay không) lẫn `gate` (bước nào
+// BẮT BUỘC hoàn tất). Hai nơi lệch nhau là cách một bước thẩm định bị lặng lẽ bỏ
+// qua. Nhãn rủi ro thiếu hoặc lạ → coi như risky.
+const needsSecurityScan = (triage: unknown) => triage !== "trivial" && triage !== "standard";
+
+const REVIEW_DONE =
+  "outcome: success khi đã thẩm định xong diff — KỂ CẢ khi có phát hiện BLOCKER (mức chặn nằm ở " +
+  "danh sách phát hiện, không nằm ở outcome). outcome: blocked khi KHÔNG thẩm định được (không xem " +
+  "được diff, thiếu quyền).";
 
 export default defineFlow({
   id: "feature-delivery",
@@ -119,7 +130,8 @@ export default defineFlow({
         `Xem diff so với origin/main. Với mỗi phát hiện nêu: file:dòng, mức độ ` +
         `(BLOCKER|MAJOR|MINOR|NIT), và kịch bản hỏng cụ thể.\n` +
         `Thứ tự soi: đúng sai → bảo mật → hiệu năng → bảo trì.\n` +
-        `Nếu không có gì chặn merge, nói thẳng. Đừng bịa phát hiện.`,
+        `Nếu không có gì chặn merge, nói thẳng. Đừng bịa phát hiện.` +
+        statusContract(REVIEW_DONE),
     }),
 
     // -------------------------------------------------------------------------
@@ -132,18 +144,39 @@ export default defineFlow({
         `Vai trò: Security. CHỈ ĐỌC.\n` +
         `Rà diff: secret bị commit, đầu vào không tin cậy chạm tới lệnh/truy vấn/đường dẫn, ` +
         `quyền bị nới rộng, phụ thuộc mới.\n` +
-        `Mỗi phát hiện: mức độ + đường tấn công + cách chặn ngắn nhất. Không nêu lý thuyết chung.`,
+        `Mỗi phát hiện: mức độ + đường tấn công + cách chặn ngắn nhất. Không nêu lý thuyết chung.` +
+        statusContract(REVIEW_DONE),
     }),
 
     // -------------------------------------------------------------------------
     // 7) TỔNG HỢP — hàm thuần tuý, không gọi model. Quyết định có chặn hay không.
+    //    Không hoàn tất ≠ sạch: bước thẩm định lỗi, không chạy, trả văn bản rỗng,
+    //    thiếu khối fleet-status hay outcome blocked/rejected cũng có 0 mục chặn,
+    //    nên phải kiểm TRƯỚC khi đếm mục chặn.
     // -------------------------------------------------------------------------
     gate: compute({
       run: (_input, prev) => {
-        const texts = [prev.review?.text ?? "", prev.securityScan?.text ?? ""];
+        const required = needsSecurityScan(prev.triage) ? ["review", "securityScan"] : ["review"];
+        const incomplete = required
+          .map((step) => [step, turnProblem(prev[step]?.text)])
+          .filter(([, why]) => why)
+          .map(([step, why]) => `${step}: ${why}`);
+        const texts = required.map((step) => prev[step]?.text ?? "");
         const blockers = texts.join("\n").match(/BLOCKER|CRITICAL/g)?.length ?? 0;
-        return { blockers, passed: blockers === 0 };
+        return { blockers, incomplete, passed: incomplete.length === 0 && blockers === 0 };
       },
+    }),
+
+    // -------------------------------------------------------------------------
+    // 7b) THẨM ĐỊNH KHÔNG HOÀN TẤT — dừng, chuyển cho người. Không đi `remediate`
+    //     (không có góp ý thật để sửa) và không có cạnh nào tới `openPr`.
+    // -------------------------------------------------------------------------
+    reviewIncomplete: checkpoint({
+      title: "Thẩm định không hoàn tất — cần người xử lý",
+      describe: (_input, prev) =>
+        `Nhánh: ${prev.prepare.branch}\n` +
+        `Bước thẩm định chưa hoàn tất:\n${prev.gate.incomplete.join("\n")}\n` +
+        `Flow dừng tại đây và KHÔNG mở PR: thiếu kết quả thẩm định không có nghĩa là sạch.`,
     }),
 
     // -------------------------------------------------------------------------
@@ -199,13 +232,16 @@ export default defineFlow({
     ["implement", "test"],
     ["test", "review"],
 
-    // Chỉ nhánh risky mới quét bảo mật; nhánh khác đi thẳng tới cổng kiểm soát
-    ["review", "securityScan", (_out, prev) => prev.triage === "risky"],
-    ["review", "gate", (_out, prev) => prev.triage !== "risky"],
+    // Chỉ nhánh risky (hoặc nhãn lạ) mới quét bảo mật; nhánh khác đi thẳng tới cổng kiểm soát
+    ["review", "securityScan", (_out, prev) => needsSecurityScan(prev.triage)],
+    ["review", "gate", (_out, prev) => !needsSecurityScan(prev.triage)],
     ["securityScan", "gate"],
 
+    // Thẩm định không hoàn tất → dừng chờ người. Kiểm trước mục chặn, như gate() của LangGraph.
+    ["gate", "reviewIncomplete", (out) => out.incomplete.length > 0],
+
     // Có mục chặn → sửa rồi thẩm định lại (flow runtime giới hạn số vòng ở cấu hình chạy)
-    ["gate", "remediate", (out) => !out.passed],
+    ["gate", "remediate", (out) => out.incomplete.length === 0 && out.blockers > 0],
     ["remediate", "review"],
 
     // Sạch → chờ người duyệt → mở PR

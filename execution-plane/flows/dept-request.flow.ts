@@ -17,6 +17,7 @@
  */
 
 import { defineFlow, acp, action, compute, decision, checkpoint, decisionEdge } from "acpx/flows";
+import { statusContract, turnProblem } from "./fleet-status.ts";
 
 export default defineFlow({
   id: "dept-request",
@@ -71,14 +72,31 @@ export default defineFlow({
         `Thẩm định bản nháp theo tiêu chí của phòng ${prev.loadProfile.name}:\n` +
         `${prev.loadProfile.reviewCriteria.map((c: string, i: number) => `${i + 1}. ${c}`).join("\n")}\n\n` +
         `Nêu mức độ cho mỗi vấn đề: BLOCKER | MAJOR | MINOR.\n\n` +
-        `Bản nháp:\n${prev.draft.text}`,
+        `Bản nháp:\n${prev.draft.text}` +
+        statusContract(
+          "outcome: success khi đã thẩm định xong bản nháp — KỂ CẢ khi có vấn đề BLOCKER (mức chặn nằm " +
+          "ở danh sách vấn đề, không nằm ở outcome). outcome: blocked khi KHÔNG thẩm định được.",
+        ),
     }),
 
+    // Không hoàn tất ≠ sạch: lượt thẩm định lỗi, rỗng hay thiếu khối fleet-status
+    // cũng có 0 BLOCKER, nên phải kiểm TRƯỚC khi đếm.
     gate: compute({
       run: (_i, prev) => {
-        const blockers = (prev.review.text.match(/BLOCKER/g) ?? []).length;
-        return { blockers, passed: blockers === 0 };
+        const incomplete = turnProblem(prev.review?.text);
+        const blockers = ((prev.review?.text ?? "").match(/BLOCKER/g) ?? []).length;
+        return { blockers, incomplete, passed: !incomplete && blockers === 0 };
       },
+    }),
+
+    // Thẩm định không hoàn tất → dừng, chuyển cho người. Không đi `revise` (không có
+    // góp ý thật để sửa) và không có cạnh nào tới `publish`.
+    reviewIncomplete: checkpoint({
+      title: "Thẩm định không hoàn tất — cần người xử lý",
+      approvers: (_i, prev) => prev.loadProfile.approvers,
+      describe: (_i, prev) =>
+        `Lượt thẩm định chưa hoàn tất: ${prev.gate.incomplete}\n` +
+        `Flow dừng tại đây và KHÔNG phát hành: thiếu kết quả thẩm định không có nghĩa là đạt.`,
     }),
 
     revise: acp({
@@ -130,7 +148,8 @@ export default defineFlow({
     ["classify", "draft"],
     ["draft", "review"],
     ["review", "gate"],
-    ["gate", "revise", (out) => !out.passed],
+    ["gate", "reviewIncomplete", (out) => Boolean(out.incomplete)],
+    ["gate", "revise", (out) => !out.incomplete && out.blockers > 0],
     ["revise", "review"],
     ["gate", "approve", (out) => out.passed],
     ["approve", "publish", (out) => out.approved === true],
