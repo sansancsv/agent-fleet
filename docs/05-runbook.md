@@ -325,7 +325,7 @@ Fleet này không dùng LangGraph Server. Nó phục vụ đồ thị bằng m�
 |---|---|
 | `GET /ok` | healthcheck |
 | `GET /profiles/<tên>/authorize?requester=` | n8n kiểm quyền **trước khi** tiêu token |
-| `POST /runs/wait` | chạy tới khi xong hoặc tới điểm chờ người duyệt |
+| `POST /runs/wait` | chạy tới khi xong hoặc tới điểm chờ người duyệt — sau chốt dataClass của hồ sơ (404/403, xem mục bên dưới) |
 | `POST /runs/<thread_id>/resume` | người duyệt trả lời → chạy tiếp đúng chỗ đã dừng |
 | `GET /runs/<thread_id>` | đọc trạng thái hiện tại |
 
@@ -504,6 +504,22 @@ giữa chừng vì mất quyền `git push`), `/resume` không dùng lại đư�
 phải chạy tiếp trực tiếp từ checkpoint bằng `graph.ainvoke(None, cfg)` (không
 truyền `Command`), gọi từ trong container `langgraph`; không có endpoint HTTP
 nào cho việc này hôm nay.
+
+### LangGraph trả `404`/`403` khi khởi động quy trình (`/runs/wait`)
+
+Cả hai xảy ra TRƯỚC khi có thread nào, nên `GET /runs/<id>` sau đó cũng trả 404.
+
+- `404 Không có hồ sơ phòng ban '<tên>'`: `/runs/wait` nạp hồ sơ của `profile`
+  trong input (bỏ trống thì `engineering`) trước khi chạy. Compose mount
+  `profiles/` vào `/fleet/profiles`; K8s (`70-langgraph.yaml`) chưa mount, nên
+  ở đó MỌI `/runs/wait` trả 404 cho tới khi có ConfigMap. Kiểm
+  `FLEET_PROFILES_DIR` và trường `profiles` của `GET /ok`.
+- `403 Hồ sơ '<tên>' không chạy được đồ thị kỹ thuật: ...`: chốt dataClass. Đồ
+  thị gọi Claude (orchestrator, architect, implementer) và Codex (reviewer,
+  security), nên chỉ hồ sơ `public`/`internal` qua được. Đây là chủ đích: đừng
+  hạ `dataClass` của hồ sơ để "cho chạy được" (xem
+  `docs/03-mo-rong-phong-ban.md`). Mỗi lần từ chối ghi `policy.decision` ra log
+  container `langgraph` và `permission.denied` vào vết chạy.
 
 ### LangGraph mất trạng thái sau khi khởi động lại
 Kiểm tra `FLEET_CHECKPOINT_DSN` đã trỏ đúng PostgreSQL chưa. Nếu để trống,

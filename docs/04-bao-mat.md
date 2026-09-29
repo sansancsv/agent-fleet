@@ -149,8 +149,8 @@ Hiện có năm nguồn, mỗi nguồn một nơi:
 | Nguồn | Cấu hình / mã | Ghi ở đâu | Nội dung |
 |---|---|---|---|
 | Gateway OpenClaw | `config.d/security.json`: `logging.audit { enabled, executionIdentity, messages: "all" }` | volume `openclaw-audit` (`/home/node/.openclaw/audit`) | sự kiện run, tool call, tin nhắn — định dạng do OpenClaw quy định |
-| LangGraph | `server.py::_audit` | stdout container `langgraph` | `permission.decision`: ai duyệt/từ chối thread nào, được chấp nhận hay bị 403 |
-| LangGraph (bền) | `trajectory.permission_denied()`, gọi từ nhánh 403 của `run_resume()` | volume `fleet-logs` (NDJSON) | mọi lượt bị 403 (sai người duyệt) ghi một dòng bền, độc lập với log container |
+| LangGraph | `server.py::_audit` | stdout container `langgraph` | `permission.decision`: ai duyệt/từ chối thread nào, được chấp nhận hay bị 403; `policy.decision`: chốt dataClass (`/profiles/<tên>/run`, `/runs/wait`) cho qua hay từ chối backend nào, với hồ sơ và mức dữ liệu nào |
+| LangGraph (bền) | `trajectory.permission_denied()`, gọi từ nhánh 403 của `run_resume()`, `dept_run()` và `run_wait()` | volume `fleet-logs` (NDJSON) | mọi lượt bị 403 (sai người duyệt, người gửi ngoài danh sách, backend không được `dataClass` cho phép) ghi một dòng bền, độc lập với log container |
 | agent-runner | `runner/server.mjs::log` | stdout container `agent-runner` | mỗi lượt: route, role, mã HTTP, thời gian |
 | n8n | node "Ghi nhật ký kiểm toán" trong workflow 01 | **chỉ trong execution data của n8n** | requestId, requester, profile, nhánh |
 | Vết chạy | `fleet/trajectory.py` | volume `fleet-memory` + stdout `langgraph` | mỗi nút: thời gian, kết quả, số vòng sửa, **chữ ký** phát hiện |
@@ -236,7 +236,7 @@ trong LangGraph. Hết lượt thì leo thang cho người — không thử ti�
 - [ ] `agent-runner` chạy non-root, có runtime sandbox
 - [ ] `AGENT_RUNNER_TOKEN` và `LANGGRAPH_TOKEN` đã đặt (cả hai dịch vụ từ chối chạy/phục vụ khi thiếu)
 - [ ] Danh sách `approvers` trong mọi `profiles/*.yaml` là người thật, khác `requesters` với dữ liệu confidential/restricted
-- [ ] Không hồ sơ nào bị hạ `dataClass` chỉ để "cho chạy được" khi `local-llm` chưa có — 403 từ chốt dataClass (`POST /profiles/<tên>/run`) là hành vi đúng (`validate.sh` bước 8a canh phần tĩnh)
+- [ ] Không hồ sơ nào bị hạ `dataClass` chỉ để "cho chạy được" khi `local-llm` chưa có — 403 từ chốt dataClass (`POST /profiles/<tên>/run`, `POST /runs/wait`) là hành vi đúng (`validate.sh` bước 8a canh phần tĩnh)
 - [ ] Không workflow n8n nào có node executeCommand (`validate.sh` bước 5c)
 - [ ] Nhật ký kiểm toán đang chảy vào hệ thống log tập trung
 - [ ] Ngân sách và giới hạn vòng lặp đã đặt

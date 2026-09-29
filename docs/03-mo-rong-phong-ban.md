@@ -144,14 +144,30 @@ chuyển nguyên mã và lý do đó cho bên gửi. Tuyến khẩn cấp của 
 OpenClaw — Claude, dự phòng OpenAI) không qua chốt này, nên chỉ hồ sơ
 `engineering` được đi tắt; phòng ban khác luôn đi qua chốt.
 
-Hôm nay `analyst` chạy Gemini, nên trạng thái thật của từng hồ sơ là:
+**Lúc chạy — `POST /runs/wait` trong `server.py`.** Đây là đường vào đồ thị kỹ
+thuật (`graph.py`). TRƯỚC `graph.ainvoke`, tức trước khi có thread nào,
+server.py nạp hồ sơ của `profile` trong input — bỏ trống thì `engineering`, như
+`initial_state`; không có hồ sơ đó thì 404 — rồi gọi `assert_backend_allowed`
+cho backend của MỌI vai trò mà đồ thị có thể gọi (`graph.GRAPH_ROLES`:
+orchestrator, architect, implementer chạy Claude; reviewer, security chạy
+Codex). Kiểm cả vai trò chỉ chạy trên nhánh `risky`, vì nhánh nào chạy do một
+lượt model phân loại quyết định, khi dữ liệu đã tới model rồi. Một vai trò không
+được phép là đủ để từ chối cả lượt: 403 kèm lý do, audit `policy.decision` ra
+stdout, `permission.denied` vào vết chạy, không có thread nào — không chạy phần
+được phép, không đổi sang backend khác. n8n luôn gửi `engineering` nên đường n8n
+không đổi; chốt này đóng đường gọi thẳng API bằng `LANGGRAPH_TOKEN`.
+`tests/test_graph_roles.py` quét `graph.py` và đỏ nếu một nút gọi vai trò chưa
+khai trong `GRAPH_ROLES`.
 
-| Hồ sơ | dataClass | Đường n8n (một lượt `analyst`) | `dept-request.flow.ts` |
-|---|---|---|---|
-| engineering | internal | không dùng — đi LangGraph `/runs/wait` hoặc tuyến SRE | — |
-| marketing | internal | chạy trên Gemini | Claude soạn, Gemini thẩm định |
-| support | confidential | **403** — Gemini không được phép | dừng ở bước phân loại (local-llm chưa có) |
-| finance, legal | restricted | **403** — chỉ local-llm được phép | dừng ở bước phân loại (local-llm chưa có) |
+Hôm nay `analyst` chạy Gemini, còn đồ thị kỹ thuật chạy Claude và Codex, nên
+trạng thái thật của từng hồ sơ là:
+
+| Hồ sơ | dataClass | Đường n8n (một lượt `analyst`) | `/runs/wait` (đồ thị kỹ thuật) | `dept-request.flow.ts` |
+|---|---|---|---|---|
+| engineering | internal | không dùng — đi `/runs/wait` hoặc tuyến SRE | chạy (Claude + Codex) | — |
+| marketing | internal | chạy trên Gemini | được phép; n8n không gửi | Claude soạn, Gemini thẩm định |
+| support | confidential | **403** — Gemini không được phép | **403** — reviewer, security chạy Codex | dừng ở bước phân loại (local-llm chưa có) |
+| finance, legal | restricted | **403** — chỉ local-llm được phép | **403** — Claude và Codex đều không được phép | dừng ở bước phân loại (local-llm chưa có) |
 
 **Đánh đổi: local-llm chưa dựng.** Backend `local-llm` trong
 `execution-plane/config/acpx.global.json` trỏ tới `/fleet/bin/local-acp-bridge.mjs`,
@@ -162,13 +178,17 @@ CHỐI có lý do rõ ràng thay vì âm thầm chạy trên backend không đư
 `dataClass` để "cho chạy được" là quyết định của người sở hữu dữ liệu, không
 phải của fleet. Để mở lại các hồ sơ này cần: (1) dựng bridge; (2) một vai trò
 chỉ đọc chạy trên `local-llm` cho đường n8n — khai đủ năm nơi như mọi vai trò
-mới (xem `CLAUDE.md`) — và cho `server.py` chọn vai trò theo `dataClass`.
+mới (xem `CLAUDE.md`) — và cho `server.py` chọn vai trò theo `dataClass`. Đồ thị
+kỹ thuật không phải đường thay thế: nó chạy Claude và Codex cho mọi hồ sơ, nên
+chỉ hồ sơ `public`/`internal` qua được chốt của `/runs/wait`.
 
 **Chưa được cưỡng chế lúc chạy:**
 
-- `POST /runs/wait` (đồ thị kỹ thuật) không kiểm `dataClass`. n8n luôn gửi hồ sơ
-  `engineering` nên hôm nay không có vi phạm, nhưng ai giữ `LANGGRAPH_TOKEN` gọi
-  thẳng với hồ sơ khác sẽ chạy Claude và Codex trên dữ liệu đó.
+- Chốt của `/runs/wait` nằm ở `server.py`, không ở trong đồ thị. Chạy `graph.py`
+  bằng đường khác — `langgraph dev`/Studio (`langgraph.json`),
+  `python -m fleet.graph`, hay gọi `graph.ainvoke` từ trong container — không
+  qua chốt. Các đường này cần quyền vào container hoặc một máy đã có khoá model,
+  không chỉ `LANGGRAPH_TOKEN`.
 - `dept-request.flow.ts` đọc `agents.*` của hồ sơ và chạy thẳng: nó chỉ được bảo
   vệ bởi bước 8a. Hồ sơ bị sửa trên máy chủ mà không qua `validate.sh` thì flow
   chạy theo hồ sơ đó.
