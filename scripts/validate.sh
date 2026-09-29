@@ -188,6 +188,15 @@ else
   fail "lệch chính sách dataClass (nguồn sự thật: policy/model-routing.yaml):"
   echo "$OUT"
 fi
+# Cửa vào của n8n nhận yêu cầu của MỌI hồ sơ, nên mọi lượt agent từ đó phải
+# qua chốt dataClass của LangGraph (POST /profiles/<tên>/run). Gọi thẳng
+# agent-runner là đi vòng qua chốt — đúng đường đã đưa dữ liệu restricted tới Gemini.
+INTAKE=orchestration/n8n/workflows/01-intake-router.json
+if grep -q 'AGENT_RUNNER_URL' "$INTAKE"; then
+  fail "$INTAKE gọi thẳng agent-runner — yêu cầu phòng ban phải qua POST \$LANGGRAPH_URL/profiles/<tên>/run"
+else
+  pass "$INTAKE không gọi thẳng agent-runner — yêu cầu phòng ban qua chốt dataClass"
+fi
 
 # --- 8b. mcporter: đối chiếu với SCHEMA THẬT của bản đã cài -----------------
 # Đây là phép kiểm tra đắt giá nhất trong script: nó bắt đúng loại lỗi chỉ lộ ra
