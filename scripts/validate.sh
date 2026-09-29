@@ -97,6 +97,22 @@ else
   fail "$AC thiếu provider_env() hoặc khai mà không gọi — hai nhánh chạy phải khớp nhau"
 fi
 
+# --- 5e. Cổng thẩm định PR của n8n phải FAIL CLOSED -------------------------
+# Lượt thẩm định lỗi (runner 504, thoát mã ≠ 0, thiếu khối fleet-status,
+# outcome blocked...) cũng cho ra 0 phát hiện; nếu node hợp nhất không kiểm,
+# PR nhận trạng thái `success` xanh. Script chạy chính code của node đó với mọi
+# tổ hợp payload mẫu, và kiểm cấu trúc mà tính chất này dựa vào.
+echo; echo "5e) n8n — cổng thẩm định PR fail closed"
+if command -v node >/dev/null 2>&1; then
+  if OUTPUT=$(node scripts/check-review-gate.mjs 2>&1); then
+    pass "02-pr-review-gate.json — $OUTPUT"
+  else
+    fail "02-pr-review-gate.json — cổng thẩm định không còn fail closed:"; echo "$OUTPUT"
+  fi
+else
+  echo "  (chưa cài node — bỏ qua)"
+fi
+
 # --- 6. NHẤT QUÁN: vai trò trong openclaw phải khớp policy và script ---------
 echo; echo "6) Nhất quán vai trò giữa các tầng"
 ROLES_OC=$(python3 scripts/json5_to_json.py control-plane/config.d/agents.json \
